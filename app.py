@@ -597,7 +597,8 @@ def get_expiring_passwords(conn, days=15):
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
     try:
-        search_filter = "(&(objectClass=user)(objectCategory=person)(!(&(userAccountControl:1.2.840.113556.1.4.803:=2)(userAccountControl:1.2.840.113556.1.4.803:=65536))))"
+        # Filtro CORRIGIDO: Exclui contas desativadas E contas com senha que nunca expira.
+        search_filter = "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
         attributes = ['cn', 'sAMAccountName', 'msDS-UserPasswordExpiryTimeComputed']
 
         entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=attributes, paged_size=1000)
