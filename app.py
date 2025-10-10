@@ -1523,21 +1523,27 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Filtro simplificado para buscar todos os usuários, conforme solicitado.
-        search_filter = "(&(objectClass=user)(objectCategory=person))"
+        # Restaurado o filtro original e complexo, conforme a consulta do usuário.
+        search_filter = "(&(&(|(&(objectCategory=person)(objectSid=*)(!samAccountType:1.2.840.113556.1.4.804:=3))(&(objectCategory=person)(!objectSid=*))(&(objectCategory=group)(groupType:1.2.840.113556.1.4.804:=14)))(objectCategory=user)(objectClass=user)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*)))"
 
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+
+        # Atributos para as colunas do CSV.
+        attributes_for_csv = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+
+        # CORREÇÃO: Garante que 'sn' (usado no filtro) seja buscado do AD.
+        attributes_to_fetch = list(set(attributes_for_csv + ['sn']))
 
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
-        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
+        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes_to_fetch, paged_size=500)
 
         for entry in entry_generator:
             row = []
-            for attr in attributes:
+            # Itera sobre a lista original para manter a ordem correta das colunas no CSV.
+            for attr in attributes_for_csv:
                 value = get_attr_value(entry, attr)
                 if attr == 'userAccountControl':
                     try:
@@ -1552,8 +1558,6 @@ def export_ad_data():
                     except (ValueError, TypeError):
                         value = 'Data Inválida'
                 row.append(str(value) or '')
-
-            # Removemos a verificação para garantir que todos os usuários sejam exportados.
             writer.writerow(row)
 
         output.seek(0)
