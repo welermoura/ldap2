@@ -1523,16 +1523,11 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Abordagem segura: Busca todos os usuários e filtra no código Python.
+        # Filtro final e mais simples: busca todos os usuários sem exceção.
         search_filter = "(&(objectClass=user)(objectCategory=person))"
 
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-
-        # Define os atributos que serão usados tanto para a busca quanto para o CSV.
-        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp', 'sn']
-
-        # Define quais atributos são obrigatórios para um usuário ser incluído no relatório.
-        required_attributes_for_export = ['displayName', 'department', 'title', 'mail', 'telephoneNumber', 'sn', 'description']
+        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
@@ -1541,14 +1536,8 @@ def export_ad_data():
         entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
 
         for entry in entry_generator:
-            # Verificação de segurança no lado da aplicação para garantir que os campos essenciais estão preenchidos.
-            if not all(get_attr_value(entry, attr) for attr in required_attributes_for_export):
-                continue # Pula para o próximo usuário se algum campo obrigatório estiver faltando.
-
             row = []
-            # Itera sobre a lista de atributos do cabeçalho para manter a ordem correta no CSV.
-            csv_attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
-            for attr in csv_attributes:
+            for attr in attributes:
                 value = get_attr_value(entry, attr)
                 if attr == 'userAccountControl':
                     try:
@@ -1563,6 +1552,8 @@ def export_ad_data():
                     except (ValueError, TypeError):
                         value = 'Data Inválida'
                 row.append(str(value) or '')
+
+            # Nenhuma verificação aqui, escreve todos os usuários encontrados.
             writer.writerow(row)
 
         output.seek(0)
