@@ -1523,19 +1523,27 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Filtro final e mais simples: busca todos os usuários sem exceção.
+        # Filtro simples para buscar todos os usuários. A lógica de filtro será feita no código.
         search_filter = "(&(objectClass=user)(objectCategory=person))"
 
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
         attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
+        # Usa UTF-8-SIG para garantir a compatibilidade de caracteres especiais no Excel.
+        output.write('\ufeff')
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
         entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
 
+        first_entry_logged = False
         for entry in entry_generator:
+            # Log de diagnóstico para o primeiro usuário encontrado.
+            if not first_entry_logged:
+                logging.info(f"Dados brutos do primeiro usuário para diagnóstico: {entry.entry_raw_attributes}")
+                first_entry_logged = True
+
             row = []
             for attr in attributes:
                 value = get_attr_value(entry, attr)
@@ -1553,11 +1561,11 @@ def export_ad_data():
                         value = 'Data Inválida'
                 row.append(str(value) or '')
 
-            # Nenhuma verificação aqui, escreve todos os usuários encontrados.
             writer.writerow(row)
 
         output.seek(0)
-        return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
+        # Resposta com a codificação correta.
+        return Response(output.getvalue(), mimetype="text/csv; charset=utf-8-sig", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
     except Exception as e:
         logging.error(f"Erro fatal na exportação de dados: {e}", exc_info=True)
         flash("Ocorreu um erro crítico ao gerar o arquivo de exportação. Verifique os logs.", "error")
