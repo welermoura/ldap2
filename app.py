@@ -544,7 +544,8 @@ def login():
 
             conn = get_ldap_connection(full_username, password)
 
-            user_object = get_user_by_samaccountname(conn, username, attributes=['memberOf'])
+            # Busca também o displayName e sAMAccountName para exibição
+            user_object = get_user_by_samaccountname(conn, username, attributes=['memberOf', 'displayName', 'sAMAccountName'])
             if not user_object:
                 flash('Nome de usuário ou senha inválidos.', 'error')
                 return redirect(url_for('login'))
@@ -555,10 +556,11 @@ def login():
                 flash('Você não tem permissão para acessar o sistema.', 'error')
                 return redirect(url_for('login'))
 
-            # Armazena o DN do usuário na sessão para referência, mas não a senha.
+            # Armazena o DN para referência interna e o displayName para exibição
             session['ad_user'] = user_object.entry_dn
+            session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
             session['user_groups'] = user_groups
-            session['sso_login'] = False # Mark as non-sso login
+            session['sso_login'] = False
             flash('Login realizado com sucesso!', 'success')
             return redirect(url_for('dashboard'))
         except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
@@ -590,7 +592,7 @@ def sso_login():
     try:
         # Para SSO, a conexão inicial é feita com a conta de serviço para verificar o usuário
         conn = get_service_account_connection()
-        user_object = get_user_by_samaccountname(conn, username, attributes=['memberOf', 'distinguishedName'])
+        user_object = get_user_by_samaccountname(conn, username, attributes=['memberOf', 'distinguishedName', 'displayName', 'sAMAccountName'])
 
         if not user_object:
             flash(f"Usuário SSO '{username}' não encontrado no Active Directory.", 'error')
@@ -604,13 +606,12 @@ def sso_login():
             logging.warning(f"Tentativa de login SSO para o usuário '{username}' falhou devido à falta de permissões.")
             return redirect(url_for('login'))
 
-        # Armazena as informações do usuário na sessão.
-        # Note que a senha não é armazenada.
-        # Usar o DN (distinguishedName) é mais robusto para futuras buscas.
+        # Armazena o DN para referência interna e o displayName para exibição
         session['ad_user'] = user_object.distinguishedName.value
-        session['ad_password'] = None # Explicitamente nulo
+        session['ad_password'] = None # Senha não é armazenada em SSO
+        session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
         session['user_groups'] = user_groups
-        session['sso_login'] = True # Marcar como login SSO
+        session['sso_login'] = True
 
         flash('Login via SSO realizado com sucesso!', 'success')
         logging.info(f"Usuário '{username}' logado com sucesso via SSO.")
