@@ -14,7 +14,7 @@ def run_verification():
             page.goto("http://127.0.0.1:5000/dashboard", timeout=60000)
 
             # 2. Aguarda e verifica se o título da página está correto
-            expect(page).to_have_title("Dashboard - Monitoramento do Ambiente", timeout=10000)
+            expect(page).to_have_title("Dashboard - Gestão AD", timeout=10000)
 
             # 3. Verifica se o link de exportação está visível
             export_link = page.get_by_role("link", name="Exportar Base AD")
