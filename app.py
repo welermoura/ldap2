@@ -1521,25 +1521,36 @@ def export_ad_data():
     try:
         conn = get_service_account_connection()
         config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
 
-        # Filtro simples para buscar todos os usuários. A lógica de filtro será feita no código.
+        search_bases = config.get('AD_SEARCH_BASE')
+        # Garante que a base de busca seja uma lista para suportar um ou múltiplos locais.
+        if isinstance(search_bases, str):
+            search_bases = [search_bases]
+
+        if not search_bases:
+            flash("A Base de Busca AD não está configurada.", "error")
+            return redirect(url_for('dashboard'))
+
         search_filter = "(&(objectClass=user)(objectCategory=person))"
-
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
         attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
-        # Usa UTF-8-SIG para garantir a compatibilidade de caracteres especiais no Excel.
-        output.write('\ufeff')
+        output.write('\ufeff') # BOM para UTF-8 no Excel
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
-        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
-
+        all_users = {} # Usado para armazenar usuários e evitar duplicatas.
         first_entry_logged = False
-        for entry in entry_generator:
-            # Log de diagnóstico para o primeiro usuário encontrado.
+
+        for base in search_bases:
+            entry_generator = conn.extend.standard.paged_search(search_base=base, search_filter=search_filter, attributes=attributes, paged_size=500)
+            for entry in entry_generator:
+                if 'dn' in entry:
+                    # Usa o DN como chave para evitar duplicatas se as OUs forem aninhadas.
+                    all_users[entry.entry_dn] = entry
+
+        for entry in all_users.values():
             if not first_entry_logged:
                 logging.info("Dados brutos do primeiro usuário para diagnóstico: %s", entry)
                 first_entry_logged = True
@@ -1560,11 +1571,9 @@ def export_ad_data():
                     except (ValueError, TypeError):
                         value = 'Data Inválida'
                 row.append(str(value) or '')
-
             writer.writerow(row)
 
         output.seek(0)
-        # Resposta com a codificação correta.
         return Response(output.getvalue(), mimetype="text/csv; charset=utf-8-sig", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
     except Exception as e:
         logging.error(f"Erro fatal na exportação de dados: {e}", exc_info=True)
