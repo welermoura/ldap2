@@ -1523,27 +1523,32 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Restaurado o filtro original e complexo, conforme a consulta do usuário.
-        search_filter = "(&(&(|(&(objectCategory=person)(objectSid=*)(!samAccountType:1.2.840.113556.1.4.804:=3))(&(objectCategory=person)(!objectSid=*))(&(objectCategory=group)(groupType:1.2.840.113556.1.4.804:=14)))(objectCategory=user)(objectClass=user)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*)))"
+        # Abordagem segura: Busca todos os usuários e filtra no código Python.
+        search_filter = "(&(objectClass=user)(objectCategory=person))"
 
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
 
-        # Atributos para as colunas do CSV.
-        attributes_for_csv = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+        # Define os atributos que serão usados tanto para a busca quanto para o CSV.
+        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp', 'sn']
 
-        # CORREÇÃO: Garante que 'sn' (usado no filtro) seja buscado do AD.
-        attributes_to_fetch = list(set(attributes_for_csv + ['sn']))
+        # Define quais atributos são obrigatórios para um usuário ser incluído no relatório.
+        required_attributes_for_export = ['displayName', 'department', 'title', 'mail', 'telephoneNumber', 'sn', 'description']
 
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
-        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes_to_fetch, paged_size=500)
+        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
 
         for entry in entry_generator:
+            # Verificação de segurança no lado da aplicação para garantir que os campos essenciais estão preenchidos.
+            if not all(get_attr_value(entry, attr) for attr in required_attributes_for_export):
+                continue # Pula para o próximo usuário se algum campo obrigatório estiver faltando.
+
             row = []
-            # Itera sobre a lista original para manter a ordem correta das colunas no CSV.
-            for attr in attributes_for_csv:
+            # Itera sobre a lista de atributos do cabeçalho para manter a ordem correta no CSV.
+            csv_attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+            for attr in csv_attributes:
                 value = get_attr_value(entry, attr)
                 if attr == 'userAccountControl':
                     try:
