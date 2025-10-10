@@ -361,7 +361,8 @@ def get_ldap_connection(user, password):
     if not ad_server:
         raise Exception("Servidor AD não configurado.")
     server = Server(ad_server, use_ssl=use_ldaps, get_info=ALL)
-    return Connection(server, user=user, password=password, auto_bind=True)
+    # Habilita o auto_referrals para seguir os redirecionamentos do AD em buscas complexas.
+    return Connection(server, user=user, password=password, auto_bind=True, auto_referrals=True)
 
 def get_service_account_connection():
     config = load_config()
@@ -1521,40 +1522,15 @@ def export_ad_data():
     try:
         conn = get_service_account_connection()
         config = load_config()
-
-        search_bases = config.get('AD_SEARCH_BASE')
-        # Garante que a base de busca seja uma lista para suportar um ou múltiplos locais.
-        if isinstance(search_bases, str):
-            search_bases = [search_bases]
-
-        if not search_bases:
-            flash("A Base de Busca AD não está configurada.", "error")
-            return redirect(url_for('dashboard'))
-
-        search_filter = "(&(objectClass=user)(objectCategory=person))"
+        search_base = config.get('AD_SEARCH_BASE')
+        search_filter = "(&(&(|(&(objectCategory=person)(objectSid=*)(!samAccountType:1.2.840.113556.1.4.804:=3))(&(objectCategory=person)(!objectSid=*))(&(objectCategory=group)(groupType:1.2.840.113556.1.4.804:=14)))(objectCategory=user)(objectClass=user)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*)))"
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
         attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
-
         output = io.StringIO()
-        output.write('\ufeff') # BOM para UTF-8 no Excel
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
-
-        all_users = {} # Usado para armazenar usuários e evitar duplicatas.
-        first_entry_logged = False
-
-        for base in search_bases:
-            entry_generator = conn.extend.standard.paged_search(search_base=base, search_filter=search_filter, attributes=attributes, paged_size=500)
-            for entry in entry_generator:
-                if 'dn' in entry:
-                    # Usa o DN como chave para evitar duplicatas se as OUs forem aninhadas.
-                    all_users[entry.entry_dn] = entry
-
-        for entry in all_users.values():
-            if not first_entry_logged:
-                logging.info("Dados brutos do primeiro usuário para diagnóstico: %s", entry)
-                first_entry_logged = True
-
+        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
+        for entry in entry_generator:
             row = []
             for attr in attributes:
                 value = get_attr_value(entry, attr)
@@ -1572,9 +1548,8 @@ def export_ad_data():
                         value = 'Data Inválida'
                 row.append(str(value) or '')
             writer.writerow(row)
-
         output.seek(0)
-        return Response(output.getvalue(), mimetype="text/csv; charset=utf-8-sig", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
+        return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
     except Exception as e:
         logging.error(f"Erro fatal na exportação de dados: {e}", exc_info=True)
         flash("Ocorreu um erro crítico ao gerar o arquivo de exportação. Verifique os logs.", "error")
