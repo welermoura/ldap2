@@ -1523,16 +1523,14 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Apenas exporta usuários que possuem um valor para todos os campos especificados.
-        # A lista de atributos obrigatórios foi baseada na solicitação do usuário.
+        # Corrigido: Apenas exige que os campos que são exportados no CSV estejam preenchidos.
+        # Isso evita o filtro excessivamente rigoroso anterior.
         required_attrs = [
-            'givenName', 'sn', 'initials', 'displayName', 'description',
-            'physicalDeliveryOfficeName', 'telephoneNumber', 'mail', 'wWWHomePage',
-            'streetAddress', 'postOfficeBox', 'l', 'st', 'postalCode', 'homePhone',
-            'pager', 'mobile', 'facsimileTelephoneNumber', 'title', 'department', 'company'
+            'displayName', 'sAMAccountName', 'department', 'title', 'mail',
+            'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description'
         ]
 
-        # Constrói a string do filtro: (&(objectClass=user)(objectCategory=person)(givenName=*)(sn=*) ... )
+        # Constrói a string do filtro: (&(objectClass=user)(objectCategory=person)(displayName=*)(sAMAccountName=*) ... )
         attr_filter_parts = "".join([f'({attr}=*)' for attr in required_attrs])
         search_filter = f"(&(objectClass=user)(objectCategory=person){attr_filter_parts})"
 
