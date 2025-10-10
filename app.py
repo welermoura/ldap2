@@ -361,8 +361,7 @@ def get_ldap_connection(user, password):
     if not ad_server:
         raise Exception("Servidor AD não configurado.")
     server = Server(ad_server, use_ssl=use_ldaps, get_info=ALL)
-    # Habilita o auto_referrals para seguir os redirecionamentos do AD em buscas complexas.
-    return Connection(server, user=user, password=password, auto_bind=True, auto_referrals=True)
+    return Connection(server, user=user, password=password, auto_bind=True)
 
 def get_service_account_connection():
     config = load_config()
@@ -1523,108 +1522,36 @@ def export_ad_data():
         conn = get_service_account_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        if not search_base:
-            flash("Base de busca do AD não configurada.", "error")
-            return redirect(url_for('dashboard'))
-
-        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
-
-        # Atributos que devem estar preenchidos para o usuário ser exportado.
-        required_attrs_for_export = [
-            'givenName', 'sn', 'initials', 'displayName', 'description',
-            'physicalDeliveryOfficeName', 'telephoneNumber', 'mail', 'wWWHomePage',
-            'streetAddress', 'postOfficeBox', 'l', 'st', 'postalCode', 'homePhone',
-            'pager', 'mobile', 'facsimileTelephoneNumber', 'title', 'department', 'company'
-        ]
-
-        # Header e atributos para o CSV final.
+        search_filter = "(&(&(|(&(objectCategory=person)(objectSid=*)(!samAccountType:1.2.840.113556.1.4.804:=3))(&(objectCategory=person)(!objectSid=*))(&(objectCategory=group)(groupType:1.2.840.113556.1.4.804:=14)))(objectCategory=user)(objectClass=user)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*)))"
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-        csv_attrs = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
-
-        # Combina os atributos necessários para o filtro e para o CSV, sem duplicatas.
-        attributes_to_fetch = list(set(required_attrs_for_export + csv_attrs))
-
+        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
         output = io.StringIO()
-        output.write('\ufeff')  # BOM para Excel UTF-8
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
-
-        entry_generator = conn.extend.standard.paged_search(
-            search_base=search_base,
-            search_filter=search_filter,
-            attributes=attributes_to_fetch, # Usa a lista combinada
-            paged_size=500,
-            generator=True
-        )
-
+        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
         for entry in entry_generator:
-            attrs = entry.get('attributes', {})
-            sam = attrs.get('sAMAccountName')
-            if not sam:
-                continue
-
-            # Filtra o usuário: verifica se todos os campos obrigatórios estão preenchidos.
-            is_complete = True
-            for attr_name in required_attrs_for_export:
-                attr_value = attrs.get(attr_name)
-                # Se o atributo estiver ausente, for None, uma string vazia ou uma lista vazia, o usuário é inválido.
-                if not attr_value:
-                    is_complete = False
-                    break
-
-            if not is_complete:
-                continue # Pula para o próximo usuário.
-
-            # Função auxiliar para obter valor com fallback seguro
-            def safe_get(attr_name, default=''):
-                val = attrs.get(attr_name)
-                return str(val) if val is not None else default
-
-            # Status da conta
-            uac_val = attrs.get('userAccountControl')
-            try:
-                uac = int(uac_val) if uac_val else 0
-                status = "Desativado" if uac & 2 else "Ativo"
-            except (ValueError, TypeError):
-                status = "Desconhecido"
-
-            # Formatação de datas
-            def format_ad_date(ft_value):
-                if not ft_value:
-                    return "Nunca"
-                try:
-                    dt = filetime_to_datetime(ft_value)
-                    return dt.strftime('%d/%m/%Y %H:%M:%S') if dt else "Nunca"
-                except Exception:
-                    return "Data Inválida"
-
-            row = [
-                safe_get('displayName'),
-                sam,
-                safe_get('department'),
-                safe_get('title'),
-                safe_get('mail'),
-                safe_get('telephoneNumber'),
-                safe_get('mobile'),
-                safe_get('physicalDeliveryOfficeName'),
-                safe_get('description'),
-                status,
-                format_ad_date(attrs.get('whenCreated')),
-                format_ad_date(attrs.get('lastLogonTimestamp'))
-            ]
-
+            row = []
+            for attr in attributes:
+                value = get_attr_value(entry, attr)
+                if attr == 'userAccountControl':
+                    try:
+                        uac = int(value)
+                        value = "Desativado" if uac & 2 else "Ativo"
+                    except (ValueError, TypeError):
+                        value = "Desconhecido"
+                elif attr in ['whenCreated', 'lastLogonTimestamp']:
+                    try:
+                        dt_obj = filetime_to_datetime(value)
+                        value = dt_obj.strftime('%d/%m/%Y %H:%M:%S') if dt_obj else 'Nunca'
+                    except (ValueError, TypeError):
+                        value = 'Data Inválida'
+                row.append(str(value) or '')
             writer.writerow(row)
-
         output.seek(0)
-        return Response(
-            output.getvalue(),
-            mimetype="text/csv; charset=utf-8-sig",
-            headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"}
-        )
-
+        return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
     except Exception as e:
-        logging.error(f"Erro na exportação de dados: {e}", exc_info=True)
-        flash("Erro ao gerar exportação. Verifique os logs.", "error")
+        logging.error(f"Erro fatal na exportação de dados: {e}", exc_info=True)
+        flash("Ocorreu um erro crítico ao gerar o arquivo de exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
