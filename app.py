@@ -1527,11 +1527,22 @@ def export_ad_data():
             flash("Base de busca do AD não configurada.", "error")
             return redirect(url_for('dashboard'))
 
-        # ✅ FILTRO CORRIGIDO: só exporta usuários reais com sAMAccountName definido
         search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
 
+        # Atributos que devem estar preenchidos para o usuário ser exportado.
+        required_attrs_for_export = [
+            'givenName', 'sn', 'initials', 'displayName', 'description',
+            'physicalDeliveryOfficeName', 'telephoneNumber', 'mail', 'wWWHomePage',
+            'streetAddress', 'postOfficeBox', 'l', 'st', 'postalCode', 'homePhone',
+            'pager', 'mobile', 'facsimileTelephoneNumber', 'title', 'department', 'company'
+        ]
+
+        # Header e atributos para o CSV final.
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+        csv_attrs = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+
+        # Combina os atributos necessários para o filtro e para o CSV, sem duplicatas.
+        attributes_to_fetch = list(set(required_attrs_for_export + csv_attrs))
 
         output = io.StringIO()
         output.write('\ufeff')  # BOM para Excel UTF-8
@@ -1541,7 +1552,7 @@ def export_ad_data():
         entry_generator = conn.extend.standard.paged_search(
             search_base=search_base,
             search_filter=search_filter,
-            attributes=attributes,
+            attributes=attributes_to_fetch, # Usa a lista combinada
             paged_size=500,
             generator=True
         )
@@ -1549,9 +1560,20 @@ def export_ad_data():
         for entry in entry_generator:
             attrs = entry.get('attributes', {})
             sam = attrs.get('sAMAccountName')
-            # ✅ Pula entradas sem login (não são usuários reais)
             if not sam:
                 continue
+
+            # Filtra o usuário: verifica se todos os campos obrigatórios estão preenchidos.
+            is_complete = True
+            for attr_name in required_attrs_for_export:
+                attr_value = attrs.get(attr_name)
+                # Se o atributo estiver ausente, for None, uma string vazia ou uma lista vazia, o usuário é inválido.
+                if not attr_value:
+                    is_complete = False
+                    break
+
+            if not is_complete:
+                continue # Pula para o próximo usuário.
 
             # Função auxiliar para obter valor com fallback seguro
             def safe_get(attr_name, default=''):
