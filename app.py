@@ -13,6 +13,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import re
 from cryptography.fernet import Fernet
+import secrets
 
 # ==============================================================================
 # Configuração Base
@@ -23,7 +24,33 @@ os.makedirs(logs_dir, exist_ok=True)
 log_path = os.path.join(logs_dir, 'ad_creator.log')
 logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'default-secret-key-for-dev')
+
+def get_flask_secret_key():
+    """
+    Carrega a secret key do Flask de forma segura.
+    Prioridade:
+    1. Variável de ambiente SECRET_KEY.
+    2. Arquivo flask_secret.key no diretório base.
+    3. Gera uma nova chave e salva no arquivo se nenhuma das anteriores existir.
+    """
+    env_key = os.environ.get('SECRET_KEY')
+    if env_key:
+        return env_key
+
+    key_file_path = os.path.join(basedir, 'flask_secret.key')
+
+    if os.path.exists(key_file_path):
+        with open(key_file_path, 'r') as f:
+            return f.read().strip()
+    else:
+        new_key = secrets.token_hex(32)
+        with open(key_file_path, 'w') as f:
+            f.write(new_key)
+        # Define permissões restritivas para o arquivo da chave
+        os.chmod(key_file_path, 0o600)
+        return new_key
+
+app.secret_key = get_flask_secret_key()
 SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
 PERMISSIONS_FILE = os.path.join(basedir, 'permissions.json')
 KEY_FILE = os.path.join(basedir, 'secret.key')
@@ -194,6 +221,45 @@ def inject_attr_value_getter():
 def inject_permission_checker():
     return dict(check_permission=check_permission)
 
+def handle_ldap_exceptions(f):
+    """
+    Decorator para tratar exceções comuns do LDAP de forma centralizada,
+    melhorando o feedback ao usuário e a resiliência da aplicação.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
+            # Lida com falha de login do usuário (ex: senha alterada)
+            if not session.get('sso_login', False):
+                session.clear()
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Credenciais inválidas ou sessão expirada.'}), 401
+                flash("Suas credenciais são inválidas ou a sessão expirou. Por favor, faça login novamente.", "error")
+                return redirect(url_for('login'))
+            # Lida com falha da conta de serviço
+            else:
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Credenciais da conta de serviço inválidas.'}), 500
+                flash("ERRO CRÍTICO: As credenciais da conta de serviço são inválidas. Contate o administrador.", "error")
+                logging.error("Credenciais da conta de serviço do AD são inválidas.", exc_info=True)
+                return redirect(url_for('dashboard'))
+        except ldap3.core.exceptions.LDAPCannotConnectResult as e:
+            error_message = f"Não foi possível conectar ao servidor AD: {e}"
+            if request.path.startswith('/api/'):
+                return jsonify({'error': error_message}), 503
+            flash(error_message, "error")
+            logging.error(error_message, exc_info=True)
+            return redirect(url_for('admin_dashboard') if 'master_admin' in session else url_for('login'))
+        except Exception as e:
+            logging.error(f"Erro inesperado na rota '{request.endpoint}': {e}", exc_info=True)
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Ocorreu um erro interno no servidor.'}), 500
+            flash(f"Ocorreu um erro inesperado: {e}", "error")
+            return redirect(request.referrer or url_for('dashboard'))
+    return decorated_function
+
 # ==============================================================================
 # Validadores Customizados e Funções Auxiliares
 # ==============================================================================
@@ -314,7 +380,8 @@ def get_user_by_samaccountname(conn, sam_account_name, attributes=None):
     if attributes is None: attributes = ldap3.ALL_ATTRIBUTES
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=attributes)
+    safe_sam = escape_filter_chars(sam_account_name)
+    conn.search(search_base, f'(sAMAccountName={safe_sam})', attributes=attributes)
     return conn.entries[0] if conn.entries else None
 
 def get_group_by_name(conn, group_name, attributes=None):
@@ -352,7 +419,8 @@ def search_general_users(conn, query):
     try:
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{query.replace('*', '')}*)(sAMAccountName=*{query.replace('*', '')}*)))"
+        safe_query = escape_filter_chars(query)
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{safe_query}*)(sAMAccountName=*{safe_query}*)))"
         attributes_to_get = ['displayName', 'name', 'mail', 'sAMAccountName', 'title', 'l', 'userAccountControl', 'distinguishedName']
         conn.search(search_base, search_filter, SUBTREE, attributes=attributes_to_get, paged_size=100)
         return conn.entries
@@ -364,6 +432,88 @@ def get_upn_suffix_from_base(search_base):
     dc_parts = [part.split('=')[1] for part in search_base.split(',') if part.strip().upper().startswith('DC=')]
     if not dc_parts: return None
     return '@' + '.'.join(dc_parts)
+
+def create_ad_user(conn, new_user_data, model_user):
+    config = load_config()
+    default_password = config.get('DEFAULT_PASSWORD')
+    if not default_password:
+        return {'success': False, 'message': 'A senha padrão para novos usuários não está configurada no painel de administração.'}
+
+    new_user_dn = None # Inicializa para o bloco de exceção
+    try:
+        # 1. Determinar OU e DN do novo usuário
+        model_ou = get_ou_from_dn(model_user.entry_dn)
+        first_name = new_user_data['first_name']
+        last_name = new_user_data['last_name']
+        full_name = f"{first_name} {last_name}"
+        new_user_dn = f"CN={full_name},{model_ou}"
+
+        # 2. Determinar UPN Suffix
+        model_upn = get_attr_value(model_user, 'userPrincipalName')
+        upn_suffix = ''
+        if '@' in model_upn:
+            upn_suffix = '@' + model_upn.split('@', 1)[1]
+        else:
+            base_suffix = get_upn_suffix_from_base(config.get('AD_SEARCH_BASE'))
+            if not base_suffix:
+                return {'success': False, 'message': 'Não foi possível determinar o sufixo UPN para o novo usuário.'}
+            upn_suffix = base_suffix
+
+        # 3. Montar atributos do novo usuário
+        sam_account = new_user_data['sam_account']
+        attributes = {
+            'objectClass': ['top', 'person', 'organizationalPerson', 'user'],
+            'cn': full_name,
+            'givenName': first_name,
+            'sn': last_name,
+            'displayName': full_name,
+            'sAMAccountName': sam_account,
+            'userPrincipalName': f"{sam_account}{upn_suffix}",
+            'telephoneNumber': new_user_data.get('telephone', ''),
+            'company': get_attr_value(model_user, 'company'),
+            'department': get_attr_value(model_user, 'department'),
+            'physicalDeliveryOfficeName': get_attr_value(model_user, 'physicalDeliveryOfficeName'),
+        }
+
+        # 4. Criar o usuário (inicialmente desabilitado por padrão)
+        conn.add(new_user_dn, attributes=attributes)
+        if conn.result['result'] != 0:
+            raise Exception(f"Falha ao adicionar usuário ao AD: {conn.result['description']} - {conn.result.get('message', '')}")
+
+        # 5. Definir a senha e habilitar a conta
+        conn.extend.microsoft.modify_password(new_user_dn, default_password)
+        if conn.result['description'] != 'success':
+            raise Exception(f"Falha ao definir a senha: {conn.result['message']}")
+
+        conn.modify(new_user_dn, {'pwdLastSet': [(ldap3.MODIFY_REPLACE, [0])]}) # Forçar troca no primeiro login
+        conn.modify(new_user_dn, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(512)])]}) # Habilitar conta
+        if conn.result['result'] != 0:
+            raise Exception(f"Falha ao habilitar a conta: {conn.result['description']}")
+
+        # 6. Adicionar usuário aos grupos do modelo
+        model_groups = get_attr_value(model_user, 'memberOf')
+        if model_groups:
+            group_dns = model_groups if isinstance(model_groups, list) else [model_groups]
+            for group_dn in group_dns:
+                try:
+                    conn.extend.microsoft.add_members_to_groups([new_user_dn], group_dn)
+                except Exception as group_error:
+                    logging.warning(f"Não foi possível adicionar o usuário '{sam_account}' ao grupo '{group_dn}': {group_error}")
+
+        logging.info(f"Usuário '{sam_account}' criado com sucesso por '{session.get('ad_user')}' usando o modelo '{get_attr_value(model_user, 'sAMAccountName')}'.")
+        return {'success': True, 'displayName': full_name, 'samAccountName': sam_account, 'password': default_password}
+
+    except ldap3.core.exceptions.LDAPEntryAlreadyExistsResult:
+        return {'success': False, 'message': f"O usuário '{full_name}' (DN: {new_user_dn}) já existe no Active Directory."}
+    except Exception as e:
+        logging.error(f"Erro ao criar usuário '{new_user_data.get('sam_account')}': {str(e)}", exc_info=True)
+        if new_user_dn:
+            try:
+                conn.delete(new_user_dn)
+                logging.info(f"Usuário parcialmente criado '{new_user_dn}' foi removido após erro.")
+            except Exception:
+                pass
+        return {'success': False, 'message': f"Ocorreu um erro inesperado: {str(e)}"}
 
 # ==============================================================================
 # Funções do Dashboard
@@ -553,29 +703,26 @@ def index():
 # ---> ROTA DO DASHBOARD ATUALIZADA <---
 @app.route('/dashboard')
 @require_auth
+@handle_ldap_exceptions
 def dashboard():
     stats = {'enabled_users': 'N/A', 'disabled_users': 'N/A'}
     expiring_passwords = []
     locked_last_week_count = 'N/A'
     pending_reactivation_count = 'N/A'
 
+    conn = get_read_connection()
+    stats = get_dashboard_stats(conn)
+    stats['locked_accounts'] = get_locked_accounts(conn)
+
+    locked_last_week_count = get_accounts_locked_in_last_week(conn)
+    pending_reactivation_count = get_pending_reactivations(days=7)
+
+    # Este try/except é mantido para a mensagem de erro específica.
     try:
-        conn = get_read_connection()
-        stats = get_dashboard_stats(conn)
-        stats['locked_accounts'] = get_locked_accounts(conn)
-
-        locked_last_week_count = get_accounts_locked_in_last_week(conn)
-        pending_reactivation_count = get_pending_reactivations(days=7)
-
-        try:
-            expiring_passwords = get_expiring_passwords(conn, days=15)
-        except Exception as e:
-            flash("Não foi possível carregar a lista de senhas expirando. O filtro pode ser incompatível.", "warning")
-            logging.error(f"Falha ao carregar senhas expirando: {e}", exc_info=True)
-
+        expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
-        flash(f"Não foi possível carregar os dados de monitoramento do dashboard: {e}", "warning")
-        logging.error(f"Falha ao carregar dados do dashboard: {e}", exc_info=True)
+        flash("Não foi possível carregar a lista de senhas expirando. O filtro pode ser incompatível.", "warning")
+        logging.error(f"Falha ao carregar senhas expirando: {e}", exc_info=True)
 
     return render_template(
         'dashboard.html',
@@ -587,110 +734,102 @@ def dashboard():
 
 @app.route('/api/dashboard_list/<category>')
 @require_auth
+@handle_ldap_exceptions
 def api_dashboard_list(category):
-    try:
-        conn = get_read_connection()
-        config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
+    conn = get_read_connection()
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
 
-        filters = {
-            'active_users': "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
-            'disabled_users': "(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))",
-            'locked_users': "(&(objectClass=user)(objectCategory=person)(lockoutTime>=1))",
-        }
-        if category not in filters:
-            return jsonify({'error': 'Categoria inválida'}), 404
+    filters = {
+        'active_users': "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+        'disabled_users': "(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))",
+        'locked_users': "(&(objectClass=user)(objectCategory=person)(lockoutTime>=1))",
+    }
+    if category not in filters:
+        return jsonify({'error': 'Categoria inválida'}), 404
 
-        attributes = ['cn', 'sAMAccountName']
-        conn.search(search_base, filters[category], attributes=attributes, paged_size=1000)
+    attributes = ['cn', 'sAMAccountName']
+    conn.search(search_base, filters[category], attributes=attributes, paged_size=1000)
 
-        results = [{'cn': get_attr_value(e, 'cn'), 'sam': get_attr_value(e, 'sAMAccountName')} for e in conn.entries]
+    results = [{'cn': get_attr_value(e, 'cn'), 'sam': get_attr_value(e, 'sAMAccountName')} for e in conn.entries]
 
-        return jsonify(sorted(results, key=lambda x: x['cn'].lower()))
-
-    except Exception as e:
-        logging.error(f"Erro na API do dashboard para '{category}': {e}", exc_info=True)
-        return jsonify({'error': 'Erro interno ao buscar dados.'}), 500
+    return jsonify(sorted(results, key=lambda x: x['cn'].lower()))
 
 @app.route('/api/user_groups/<username>')
 @require_auth
+@handle_ldap_exceptions
 def api_get_user_groups(username):
-    try:
-        read_conn = get_read_connection()
-        user = get_user_by_samaccountname(read_conn, username, attributes=['memberOf'])
-        if not user: return jsonify({"error": "Usuário não encontrado"}), 404
-        if 'memberOf' not in user or not user.memberOf.values: return jsonify([])
-        group_dns = user.memberOf.values
-        service_conn = get_service_account_connection()
-        groups_details = []
-        for group_dn in group_dns:
-            try:
-                service_conn.search(group_dn, '(objectClass=group)', search_scope=BASE, attributes=['cn', 'description'])
-                if service_conn.entries:
-                    group = service_conn.entries[0]
-                    groups_details.append({"cn": get_attr_value(group, 'cn'), "description": get_attr_value(group, 'description')})
-            except Exception: continue
-        return jsonify(sorted(groups_details, key=lambda g: g['cn'].lower()))
-    except Exception as e:
-        logging.error(f"Erro ao buscar grupos para {username}: {str(e)}")
-        return jsonify({"error": "Erro interno do servidor"}), 500
+    read_conn = get_read_connection()
+    user = get_user_by_samaccountname(read_conn, username, attributes=['memberOf'])
+    if not user: return jsonify({"error": "Usuário não encontrado"}), 404
+    if 'memberOf' not in user or not user.memberOf.values: return jsonify([])
+    group_dns = user.memberOf.values
+    service_conn = get_service_account_connection()
+    groups_details = []
+    for group_dn in group_dns:
+        # Ignora grupos individuais que não podem ser lidos, sem falhar a requisição inteira
+        try:
+            service_conn.search(group_dn, '(objectClass=group)', search_scope=BASE, attributes=['cn', 'description'])
+            if service_conn.entries:
+                group = service_conn.entries[0]
+                groups_details.append({"cn": get_attr_value(group, 'cn'), "description": get_attr_value(group, 'description')})
+        except Exception: continue
+    return jsonify(sorted(groups_details, key=lambda g: g['cn'].lower()))
 
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_create')
+@handle_ldap_exceptions
 def create_user_form():
     form = CreateUserForm()
     if form.validate_on_submit():
-        try:
-            conn = get_read_connection()
-            model_name = form.model_name.data.strip()
-            if not model_name:
-                flash("O nome do usuário modelo é obrigatório.", 'error')
-                return render_template('create_user_form.html', form=form)
-            users = search_general_users(conn, model_name)
-            if not users:
-                flash(f"Nenhum usuário encontrado com o nome '{model_name}'.", 'error')
-                return render_template('create_user_form.html', form=form)
-            session['form_data'] = {'first_name': form.first_name.data, 'last_name': form.last_name.data, 'sam_account': form.sam_account.data, 'telephone': form.telephone.data}
-            session['found_users_sams'] = [u.sAMAccountName.value for u in users]
-            return redirect(url_for('select_model'))
-        except Exception as e: flash(f"Erro ao buscar modelo: {e}", 'error')
+        conn = get_read_connection()
+        model_name = form.model_name.data.strip()
+        if not model_name:
+            flash("O nome do usuário modelo é obrigatório.", 'error')
+            return render_template('create_user_form.html', form=form)
+        users = search_general_users(conn, model_name)
+        if not users:
+            flash(f"Nenhum usuário encontrado com o nome '{model_name}'.", 'error')
+            return render_template('create_user_form.html', form=form)
+        session['form_data'] = {'first_name': form.first_name.data, 'last_name': form.last_name.data, 'sam_account': form.sam_account.data, 'telephone': form.telephone.data}
+        session['found_users_sams'] = [u.sAMAccountName.value for u in users]
+        return redirect(url_for('select_model'))
     return render_template('create_user_form.html', form=form)
 
 @app.route('/select_model', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_create')
+@handle_ldap_exceptions
 def select_model():
     form_data = session.get('form_data')
     if not form_data: return redirect(url_for('index'))
     users = []
-    try:
-        conn = get_read_connection()
-        for sam_name in session.get('found_users_sams', []):
-            user_entry = get_user_by_samaccountname(conn, sam_name, ['name', 'sAMAccountName', 'distinguishedName', 'physicalDeliveryOfficeName'])
-            if user_entry:
-                users.append({'name': user_entry.name.value, 'sam_account': user_entry.sAMAccountName.value, 'office': str(user_entry.physicalDeliveryOfficeName.value) if 'physicalDeliveryOfficeName' in user_entry and user_entry.physicalDeliveryOfficeName.value else 'N/A', 'ou_path': get_ou_path(user_entry.entry_dn)})
-    except Exception as e:
-        flash(f"Erro ao carregar lista de modelos: {e}", 'error')
-        return redirect(url_for('index'))
+    conn = get_read_connection()
+    for sam_name in session.get('found_users_sams', []):
+        user_entry = get_user_by_samaccountname(conn, sam_name, ['name', 'sAMAccountName', 'distinguishedName', 'physicalDeliveryOfficeName'])
+        if user_entry:
+            users.append({'name': user_entry.name.value, 'sam_account': user_entry.sAMAccountName.value, 'office': str(user_entry.physicalDeliveryOfficeName.value) if 'physicalDeliveryOfficeName' in user_entry and user_entry.physicalDeliveryOfficeName.value else 'N/A', 'ou_path': get_ou_path(user_entry.entry_dn)})
+
     form = FlaskForm()
     if request.method == 'POST':
         selected_user_sam = request.form.get('selected_user_sam')
         if not selected_user_sam:
             flash("Por favor, selecione um usuário modelo.", 'error')
             return render_template('select_model.html', users=users, form_data=form_data, form=form)
-        try:
-            service_conn = get_service_account_connection()
-            model_attrs = get_user_by_samaccountname(service_conn, selected_user_sam)
-            result = create_ad_user(service_conn, form_data, model_attrs)
-            if result['success']:
-                session.pop('form_data', None)
-                session.pop('found_users_sams', None)
-                return render_template('result.html', result=result)
-            else: flash(result['message'], 'error')
-        except Exception as e:
-            flash(f"Erro fatal ao criar usuário: {e}", 'error')
-            return redirect(url_for('index'))
+
+        service_conn = get_service_account_connection()
+        model_attrs = get_user_by_samaccountname(service_conn, selected_user_sam)
+        result = create_ad_user(service_conn, form_data, model_attrs)
+        if result['success']:
+            session.pop('form_data', None)
+            session.pop('found_users_sams', None)
+            return render_template('result.html', result=result)
+        else:
+            flash(result['message'], 'error')
+            # Renderiza a mesma página para que o usuário possa escolher outro modelo se desejar
+            return render_template('select_model.html', users=users, form_data=form_data, form=form)
+
     return render_template('select_model.html', users=users, form_data=form_data, form=form)
 
 @app.route('/result')
@@ -699,345 +838,304 @@ def result(): return redirect(url_for('index'))
 
 @app.route('/manage_users', methods=['GET', 'POST'])
 @require_auth
+@handle_ldap_exceptions
 def manage_users():
     form = UserSearchForm()
     users = []
     if form.validate_on_submit():
-        try:
-            conn = get_read_connection()
-            users = search_general_users(conn, form.search_query.data.strip())
-        except Exception as e: flash(f"Erro ao conectar ou buscar usuários: {e}", "error")
+        conn = get_read_connection()
+        users = search_general_users(conn, form.search_query.data.strip())
     return render_template('manage_users.html', form=form, users=users)
 
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def group_management():
     form = GroupSearchForm()
     groups = []
     if form.validate_on_submit():
-        try:
-            conn = get_service_account_connection()
-            config, query = load_config(), form.search_query.data
-            search_base = config.get('AD_SEARCH_BASE')
-            search_filter = f"(&(objectClass=group)(cn=*{query}*))"
-            conn.search(search_base, search_filter, attributes=['cn', 'description', 'member'], paged_size=1000)
-            groups = conn.entries
-            if not groups: flash(f"Nenhum grupo encontrado com o nome '{query}'.", "info")
-        except Exception as e:
-            flash(f"Erro ao buscar grupos: {e}", "error")
-            logging.error(f"Erro ao buscar grupos com a query '{form.search_query.data}': {e}", exc_info=True)
+        conn = get_service_account_connection()
+        config, query = load_config(), form.search_query.data
+        search_base = config.get('AD_SEARCH_BASE')
+        safe_query = escape_filter_chars(query)
+        search_filter = f"(&(objectClass=group)(cn=*{safe_query}*))"
+        conn.search(search_base, search_filter, attributes=['cn', 'description', 'member'], paged_size=1000)
+        groups = conn.entries
+        if not groups: flash(f"Nenhum grupo encontrado com o nome '{query}'.", "info")
     return render_template('manage_groups.html', form=form, groups=groups)
 
 @app.route('/api/group_members/<group_name>')
 @require_auth
 @require_api_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def api_group_members(group_name):
-    try:
-        conn = get_service_account_connection()
-        page, per_page, search_query = request.args.get('page', 1, type=int), request.args.get('per_page', 10, type=int), request.args.get('query', '', type=str).strip()
-        group = get_group_by_name(conn, group_name, attributes=['member'])
-        if not group: return jsonify({'error': 'Group not found'}), 404
-        member_dns = group.member.values if group.member.values else []
-        if search_query:
-            escaped_query = re.escape(search_query)
-            member_dns = [dn for dn in member_dns if re.search(f'CN={escaped_query}', dn, re.IGNORECASE)]
-        total_members = len(member_dns)
-        start, end = (page - 1) * per_page, (page - 1) * per_page + per_page
-        paginated_dns, members_details = sorted(member_dns)[start:end], []
-        attributes_to_get = ['displayName', 'sAMAccountName', 'title', 'l']
-        for dn in paginated_dns:
-            user_entry = get_user_by_dn(conn, dn, attributes=attributes_to_get)
-            if user_entry: members_details.append({'displayName': get_attr_value(user_entry, 'displayName'), 'sAMAccountName': get_attr_value(user_entry, 'sAMAccountName'), 'title': get_attr_value(user_entry, 'title'), 'city': get_attr_value(user_entry, 'l')})
-            else:
-                cn_part = dn.split(',')[0]
-                display_name = cn_part.split('=')[1] if '=' in cn_part else cn_part
-                members_details.append({'displayName': f"{display_name} (Objeto desconhecido)", 'sAMAccountName': 'N/A', 'title': 'N/A', 'city': 'N/A'})
-        return jsonify({'members': members_details, 'total': total_members, 'page': page, 'per_page': per_page, 'total_pages': (total_members + per_page - 1) // per_page})
-    except Exception as e:
-        logging.error(f"Erro na API de membros do grupo '{group_name}': {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+    conn = get_service_account_connection()
+    page, per_page, search_query = request.args.get('page', 1, type=int), request.args.get('per_page', 10, type=int), request.args.get('query', '', type=str).strip()
+    group = get_group_by_name(conn, group_name, attributes=['member'])
+    if not group: return jsonify({'error': 'Group not found'}), 404
+    member_dns = group.member.values if group.member.values else []
+    if search_query:
+        escaped_query = re.escape(search_query)
+        member_dns = [dn for dn in member_dns if re.search(f'CN={escaped_query}', dn, re.IGNORECASE)]
+    total_members = len(member_dns)
+    start, end = (page - 1) * per_page, (page - 1) * per_page + per_page
+    paginated_dns, members_details = sorted(member_dns)[start:end], []
+    attributes_to_get = ['displayName', 'sAMAccountName', 'title', 'l']
+    for dn in paginated_dns:
+        user_entry = get_user_by_dn(conn, dn, attributes=attributes_to_get)
+        if user_entry: members_details.append({'displayName': get_attr_value(user_entry, 'displayName'), 'sAMAccountName': get_attr_value(user_entry, 'sAMAccountName'), 'title': get_attr_value(user_entry, 'title'), 'city': get_attr_value(user_entry, 'l')})
+        else:
+            cn_part = dn.split(',')[0]
+            display_name = cn_part.split('=')[1] if '=' in cn_part else cn_part
+            members_details.append({'displayName': f"{display_name} (Objeto desconhecido)", 'sAMAccountName': 'N/A', 'title': 'N/A', 'city': 'N/A'})
+    return jsonify({'members': members_details, 'total': total_members, 'page': page, 'per_page': per_page, 'total_pages': (total_members + per_page - 1) // per_page})
+
 @app.route('/api/search_users_for_group/<group_name>')
 @require_auth
 @require_api_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def api_search_users_for_group(group_name):
     query = request.args.get('query', '')
     if not query or len(query) < 3: return jsonify([])
-    try:
-        conn = get_service_account_connection()
-        group = get_group_by_name(conn, group_name, attributes=['member'])
-        if not group: return jsonify({'error': 'Group not found'}), 404
-        current_member_dns = {m.lower() for m in group.member.values} if group.member.values else set()
-        all_found_users = search_general_users(conn, query)
-        user_search_results = [{'displayName': get_attr_value(user, 'displayName'), 'sAMAccountName': get_attr_value(user, 'sAMAccountName'), 'title': get_attr_value(user, 'title'), 'city': get_attr_value(user, 'l')} for user in all_found_users if user.distinguishedName.value.lower() not in current_member_dns]
-        return jsonify(user_search_results)
-    except Exception as e:
-        logging.error(f"Erro na API de busca de usuários para o grupo '{group_name}': {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+    conn = get_service_account_connection()
+    group = get_group_by_name(conn, group_name, attributes=['member'])
+    if not group: return jsonify({'error': 'Group not found'}), 404
+    current_member_dns = {m.lower() for m in group.member.values} if group.member.values else set()
+    all_found_users = search_general_users(conn, query)
+    user_search_results = [{'displayName': get_attr_value(user, 'displayName'), 'sAMAccountName': get_attr_value(user, 'sAMAccountName'), 'title': get_attr_value(user, 'title'), 'city': get_attr_value(user, 'l')} for user in all_found_users if user.distinguishedName.value.lower() not in current_member_dns]
+    return jsonify(user_search_results)
 
 @app.route('/view_group/<group_name>')
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def view_group(group_name):
     form = FlaskForm()
-    try:
-        conn = get_service_account_connection()
-        group = get_group_by_name(conn, group_name, attributes=['cn', 'description'])
-        if not group:
-            flash(f"Grupo '{group_name}' não encontrado.", 'error')
-            return redirect(url_for('group_management'))
-        return render_template('view_group.html', group=group, form=form)
-    except Exception as e:
-        flash(f"Erro ao carregar a página do grupo: {e}", "error")
-        logging.error(f"Erro ao carregar a view do grupo '{group_name}': {e}", exc_info=True)
+    conn = get_service_account_connection()
+    group = get_group_by_name(conn, group_name, attributes=['cn', 'description'])
+    if not group:
+        flash(f"Grupo '{group_name}' não encontrado.", 'error')
         return redirect(url_for('group_management'))
+    return render_template('view_group.html', group=group, form=form)
 @app.route('/add_member/<group_name>', methods=['POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def add_member(group_name):
     user_sam = request.form.get('user_sam')
     if not user_sam:
         flash("Login do usuário não fornecido.", 'error')
         return redirect(url_for('view_group', group_name=group_name))
-    try:
-        conn = get_service_account_connection()
-        user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-        if user_to_add and group_to_modify:
-            conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' com sucesso.", 'success')
-                logging.info(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por '{session.get('ad_user')}'.")
-            else:
-                flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
-        else: flash("Usuário ou grupo não encontrado.", 'error')
-    except Exception as e:
-        flash(f"Erro ao adicionar usuário ao grupo: {e}", "error")
-        logging.error(f"Erro ao adicionar '{user_sam}' ao grupo '{group_name}': {e}", exc_info=True)
+    conn = get_service_account_connection()
+    user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+    group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+    if user_to_add and group_to_modify:
+        conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
+        if conn.result['description'] == 'success':
+            flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' com sucesso.", 'success')
+            logging.info(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por '{session.get('ad_user')}'.")
+        else:
+            flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
+    else: flash("Usuário ou grupo não encontrado.", 'error')
     return redirect(url_for('view_group', group_name=group_name))
 @app.route('/remove_member/<group_name>/<user_sam>', methods=['POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def remove_member(group_name, user_sam):
-    try:
-        conn = get_service_account_connection()
-        user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-        if user_to_remove and group_to_modify:
-            conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' com sucesso.", 'success')
-                logging.info(f"Usuário '{user_sam}' removido do grupo '{group_name}' por '{session.get('ad_user')}'.")
-            else:
-                flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
-        else: flash("Usuário ou grupo não encontrado.", 'error')
-    except Exception as e:
-        flash(f"Erro ao remover usuário do grupo: {e}", "error")
-        logging.error(f"Erro ao remover '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
+    conn = get_service_account_connection()
+    user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+    group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+    if user_to_remove and group_to_modify:
+        conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
+        if conn.result['description'] == 'success':
+            flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' com sucesso.", 'success')
+            logging.info(f"Usuário '{user_sam}' removido do grupo '{group_name}' por '{session.get('ad_user')}'.")
+        else:
+            flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
+    else: flash("Usuário ou grupo não encontrado.", 'error')
     return redirect(url_for('view_group', group_name=group_name))
 @app.route('/add_member_temp/<group_name>', methods=['POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def add_member_temp(group_name):
-    try:
-        days = int(request.args.get('days'))
-        user_sam = request.form.get('user_sam')
-        if days <= 0 or not user_sam:
-            flash("Informações inválidas para adição temporária.", 'error')
-            return redirect(url_for('view_group', group_name=group_name))
-        conn = get_service_account_connection()
-        user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-        if user_to_add and group_to_modify:
-            conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                schedules = load_group_schedules()
-                revert_date = (date.today() + timedelta(days=days)).isoformat()
-                schedules.append({'user_sam': user_sam, 'group_name': group_name, 'revert_action': 'remove', 'revert_date': revert_date})
-                save_group_schedules(schedules)
-                flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por {days} dias.", 'success')
-                logging.info(f"Usuário '{user_sam}' adicionado temporariamente ao grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
-            else: flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
-        else: flash("Usuário ou grupo não encontrado.", 'error')
-    except Exception as e:
-        flash(f"Erro na adição temporária: {e}", 'error')
-        logging.error(f"Erro ao adicionar temp '{request.form.get('user_sam')}' ao grupo '{group_name}': {e}", exc_info=True)
+    days = int(request.args.get('days'))
+    user_sam = request.form.get('user_sam')
+    if days <= 0 or not user_sam:
+        flash("Informações inválidas para adição temporária.", 'error')
+        return redirect(url_for('view_group', group_name=group_name))
+    conn = get_service_account_connection()
+    user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+    group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+    if user_to_add and group_to_modify:
+        conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
+        if conn.result['description'] == 'success':
+            schedules = load_group_schedules()
+            revert_date = (date.today() + timedelta(days=days)).isoformat()
+            schedules.append({'user_sam': user_sam, 'group_name': group_name, 'revert_action': 'remove', 'revert_date': revert_date})
+            save_group_schedules(schedules)
+            flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por {days} dias.", 'success')
+            logging.info(f"Usuário '{user_sam}' adicionado temporariamente ao grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
+        else: flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
+    else: flash("Usuário ou grupo não encontrado.", 'error')
     return redirect(url_for('view_group', group_name=group_name))
 @app.route('/remove_member_temp/<group_name>/<user_sam>', methods=['POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
+@handle_ldap_exceptions
 def remove_member_temp(group_name, user_sam):
-    try:
-        days = int(request.args.get('days'))
-        if days <= 0:
-            flash("O número de dias deve ser positivo.", 'error')
-            return redirect(url_for('view_group', group_name=group_name))
-        conn = get_service_account_connection()
-        user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-        if user_to_remove and group_to_modify:
-            conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                schedules = load_group_schedules()
-                revert_date = (date.today() + timedelta(days=days)).isoformat()
-                schedules.append({'user_sam': user_sam, 'group_name': group_name, 'revert_action': 'add', 'revert_date': revert_date})
-                save_group_schedules(schedules)
-                flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' por {days} dias.", 'success')
-                logging.info(f"Usuário '{user_sam}' removido temporariamente do grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
-            else: flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
-        else: flash("Usuário ou grupo não encontrado.", 'error')
-    except Exception as e:
-        flash(f"Erro na remoção temporária: {e}", 'error')
-        logging.error(f"Erro ao remover temp '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
+    days = int(request.args.get('days'))
+    if days <= 0:
+        flash("O número de dias deve ser positivo.", 'error')
+        return redirect(url_for('view_group', group_name=group_name))
+    conn = get_service_account_connection()
+    user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+    group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+    if user_to_remove and group_to_modify:
+        conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
+        if conn.result['description'] == 'success':
+            schedules = load_group_schedules()
+            revert_date = (date.today() + timedelta(days=days)).isoformat()
+            schedules.append({'user_sam': user_sam, 'group_name': group_name, 'revert_action': 'add', 'revert_date': revert_date})
+            save_group_schedules(schedules)
+            flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' por {days} dias.", 'success')
+            logging.info(f"Usuário '{user_sam}' removido temporariamente do grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
+        else: flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
+    else: flash("Usuário ou grupo não encontrado.", 'error')
     return redirect(url_for('view_group', group_name=group_name))
 @app.route('/view_user/<username>')
 @require_auth
+@handle_ldap_exceptions
 def view_user(username):
-    try:
-        conn = get_read_connection()
-        user = get_user_by_samaccountname(conn, username, attributes=['*', 'msDS-UserPasswordExpiryTimeComputed'])
-        if not user:
-            logging.warning(f"Usuário '{session.get('ad_user')}' tentou ver '{username}' sem sucesso.")
-            flash("Usuário não encontrado ou você não tem permissão para ver os detalhes.", "error")
-            return redirect(url_for('manage_users'))
-        password_expiry_info = "Não aplicável ou senha nunca expira."
-        if 'msDS-UserPasswordExpiryTimeComputed' in user and user['msDS-UserPasswordExpiryTimeComputed'].value:
-            expiry_time_ft = user['msDS-UserPasswordExpiryTimeComputed'].value
-            expiry_datetime = filetime_to_datetime(expiry_time_ft)
-            if expiry_datetime:
-                delta = expiry_datetime - datetime.now(timezone.utc)
-                if delta.days >= 0:
-                    password_expiry_info = f"Expira em {delta.days} dia(s) ({expiry_datetime.strftime('%d/%m/%Y')})"
-                else:
-                    password_expiry_info = f"Expirou há {-delta.days} dia(s) ({expiry_datetime.strftime('%d/%m/%Y')})"
-        form = EditUserForm()
-        return render_template('view_user.html', user=user, form=form, password_expiry_info=password_expiry_info)
-    except Exception as e:
-        flash(f"Erro ao buscar detalhes do usuário: {e}", "error")
-        logging.error(f"Erro ao buscar detalhes de '{username}': {e}", exc_info=True)
+    conn = get_read_connection()
+    user = get_user_by_samaccountname(conn, username, attributes=['*', 'msDS-UserPasswordExpiryTimeComputed'])
+    if not user:
+        logging.warning(f"Usuário '{session.get('ad_user')}' tentou ver '{username}' sem sucesso.")
+        flash("Usuário não encontrado ou você não tem permissão para ver os detalhes.", "error")
         return redirect(url_for('manage_users'))
+    password_expiry_info = "Não aplicável ou senha nunca expira."
+    if 'msDS-UserPasswordExpiryTimeComputed' in user and user['msDS-UserPasswordExpiryTimeComputed'].value:
+        expiry_time_ft = user['msDS-UserPasswordExpiryTimeComputed'].value
+        expiry_datetime = filetime_to_datetime(expiry_time_ft)
+        if expiry_datetime:
+            delta = expiry_datetime - datetime.now(timezone.utc)
+            if delta.days >= 0:
+                password_expiry_info = f"Expira em {delta.days} dia(s) ({expiry_datetime.strftime('%d/%m/%Y')})"
+            else:
+                password_expiry_info = f"Expirou há {-delta.days} dia(s) ({expiry_datetime.strftime('%d/%m/%Y')})"
+    form = EditUserForm()
+    return render_template('view_user.html', user=user, form=form, password_expiry_info=password_expiry_info)
 @app.route('/toggle_status/<username>', methods=['POST'])
 @require_auth
 @require_permission(action='can_disable')
+@handle_ldap_exceptions
 def toggle_status(username):
-    try:
-        conn = get_service_account_connection()
-        user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
-        uac = user.userAccountControl.value
-        new_uac, action_message = (uac - 2, "ativada") if uac & 2 else (uac + 2, "desativada")
-        conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(new_uac)])]})
-        if action_message == "ativada":
-            schedules = load_schedules()
-            if username in schedules:
-                del schedules[username]
-                save_schedules(schedules)
-                logging.info(f"Agendamento de reativação para '{username}' removido por reativação manual.")
-        logging.info(f"Conta '{username}' foi {action_message} por '{session.get('ad_user')}'.")
-        flash(f"Conta do usuário foi {action_message} com sucesso.", "success")
-    except Exception as e:
-        flash(f"Erro ao alterar status da conta: {e}", "error")
-        logging.error(f"Erro em toggle_status para '{username}': {e}", exc_info=True)
+    conn = get_service_account_connection()
+    user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
+    if not user:
+        flash("Usuário não encontrado.", "error")
+        return redirect(url_for('manage_users'))
+    uac = user.userAccountControl.value
+    new_uac, action_message = (uac - 2, "ativada") if uac & 2 else (uac + 2, "desativada")
+    conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(new_uac)])]})
+    if action_message == "ativada":
+        schedules = load_schedules()
+        if username in schedules:
+            del schedules[username]
+            save_schedules(schedules)
+            logging.info(f"Agendamento de reativação para '{username}' removido por reativação manual.")
+    logging.info(f"Conta '{username}' foi {action_message} por '{session.get('ad_user')}'.")
+    flash(f"Conta do usuário foi {action_message} com sucesso.", "success")
     return redirect(url_for('view_user', username=username))
 @app.route('/disable_user_temp/<username>', methods=['POST'])
 @require_auth
 @require_permission(action='can_disable')
+@handle_ldap_exceptions
 def disable_user_temp(username):
-    try:
-        days = int(request.args.get('days'))
-        if days <= 0:
-            flash("O número de dias deve ser positivo.", "error")
-            return redirect(url_for('view_user', username=username))
-        conn = get_service_account_connection()
-        user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
-        uac = user.userAccountControl.value
-        if not (uac & 2):
-            conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(uac + 2)])]})
-        schedules = load_schedules()
-        reactivation_date = (date.today() + timedelta(days=days)).isoformat()
-        schedules[username] = reactivation_date
-        save_schedules(schedules)
-        logging.info(f"Conta de '{username}' desativada por {days} dias por '{session.get('ad_user')}'. Reativação: {reactivation_date}.")
-        flash(f"Conta do usuário desativada. Reativação agendada para {reactivation_date}.", "success")
-    except Exception as e:
-        flash(f"Erro ao desativar conta temporariamente: {e}", "error")
-        logging.error(f"Erro em disable_user_temp para '{username}': {e}", exc_info=True)
+    days = int(request.args.get('days'))
+    if days <= 0:
+        flash("O número de dias deve ser positivo.", "error")
+        return redirect(url_for('view_user', username=username))
+    conn = get_service_account_connection()
+    user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
+    if not user:
+        flash("Usuário não encontrado.", "error")
+        return redirect(url_for('manage_users'))
+    uac = user.userAccountControl.value
+    if not (uac & 2):
+        conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(uac + 2)])]})
+    schedules = load_schedules()
+    reactivation_date = (date.today() + timedelta(days=days)).isoformat()
+    schedules[username] = reactivation_date
+    save_schedules(schedules)
+    logging.info(f"Conta de '{username}' desativada por {days} dias por '{session.get('ad_user')}'. Reativação: {reactivation_date}.")
+    flash(f"Conta do usuário desativada. Reativação agendada para {reactivation_date}.", "success")
     return redirect(url_for('view_user', username=username))
 @app.route('/reset_password/<username>', methods=['POST'])
 @require_auth
 @require_permission(action='can_reset_password')
+@handle_ldap_exceptions
 def reset_password(username):
-    try:
-        conn = get_service_account_connection()
-        user = get_user_by_samaccountname(conn, username, ['distinguishedName'])
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
-        config = load_config()
-        default_password = config.get('DEFAULT_PASSWORD')
-        if not default_password:
-            flash("A senha padrão não está definida.", "error")
-            return redirect(url_for('view_user', username=username))
-        conn.extend.microsoft.modify_password(user.distinguishedName.value, default_password)
-        conn.modify(user.distinguishedName.value, {'pwdLastSet': [(ldap3.MODIFY_REPLACE, [0])]})
-        logging.info(f"Senha para '{username}' resetada por '{session.get('ad_user')}'.")
-        flash(f"Senha resetada. Nova senha temporária: {default_password}", "success")
-    except Exception as e:
-        flash(f"Erro ao resetar a senha: {e}", "error")
-        logging.error(f"Erro em reset_password para '{username}': {e}", exc_info=True)
+    conn = get_service_account_connection()
+    user = get_user_by_samaccountname(conn, username, ['distinguishedName'])
+    if not user:
+        flash("Usuário não encontrado.", "error")
+        return redirect(url_for('manage_users'))
+    config = load_config()
+    default_password = config.get('DEFAULT_PASSWORD')
+    if not default_password:
+        flash("A senha padrão não está definida.", "error")
+        return redirect(url_for('view_user', username=username))
+    conn.extend.microsoft.modify_password(user.distinguishedName.value, default_password)
+    conn.modify(user.distinguishedName.value, {'pwdLastSet': [(ldap3.MODIFY_REPLACE, [0])]})
+    logging.info(f"Senha para '{username}' resetada por '{session.get('ad_user')}'.")
+    flash(f"Senha resetada. Nova senha temporária: {default_password}", "success")
     return redirect(url_for('view_user', username=username))
 @app.route('/edit_user/<username>', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_edit')
+@handle_ldap_exceptions
 def edit_user(username):
-    try:
-        conn = get_read_connection()
-        user = get_user_by_samaccountname(conn, username)
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
-        form = EditUserForm()
-        editable_fields = {f.name for f in form if f.type not in ('CSRFTokenField', 'SubmitField') and check_permission(field=f.name)}
-        if request.method == 'POST':
-            for field_name, field in form._fields.items():
-                if field_name not in editable_fields and field_name not in ['csrf_token', 'submit']:
-                    field.validators = []
-        if form.validate_on_submit():
-            service_conn = get_service_account_connection()
-            changes = {}
-            field_to_attr = {'first_name': 'givenName', 'last_name': 'sn', 'initials': 'initials', 'display_name': 'displayName', 'description': 'description', 'office': 'physicalDeliveryOfficeName', 'telephone': 'telephoneNumber', 'email': 'mail', 'web_page': 'wWWHomePage', 'street': 'streetAddress', 'post_office_box': 'postOfficeBox', 'city': 'l', 'state': 'st', 'zip_code': 'postalCode', 'home_phone': 'homePhone', 'pager': 'pager', 'mobile': 'mobile', 'fax': 'facsimileTelephoneNumber', 'title': 'title', 'department': 'department', 'company': 'company'}
-            for field_name in editable_fields:
-                if field_name in field_to_attr:
-                    attr_name = field_to_attr[field_name]
-                    submitted_value = getattr(form, field_name).data
-                    original_value = get_attr_value(user, attr_name)
-                    if submitted_value != original_value:
-                        changes[attr_name] = [(ldap3.MODIFY_REPLACE, [submitted_value or ''])]
-            if changes:
-                service_conn.modify(user.distinguishedName.value, changes)
-                if service_conn.result['description'] == 'success':
-                    flash('Usuário atualizado com sucesso!', 'success')
-                    logging.info(f"Usuário '{username}' atualizado por '{session.get('ad_user')}'. Campos: {list(changes.keys())}")
-                else:
-                    flash(f"Erro ao atualizar usuário: {service_conn.result['message']}", 'error')
-            else:
-                flash("Nenhum valor foi alterado.", "info")
-            return redirect(url_for('view_user', username=username))
-        for field in form:
-            field_to_attr = {'first_name': 'givenName', 'last_name': 'sn', 'initials': 'initials', 'display_name': 'displayName', 'description': 'description', 'office': 'physicalDeliveryOfficeName', 'telephone': 'telephoneNumber', 'email': 'mail', 'web_page': 'wWWHomePage', 'street': 'streetAddress', 'post_office_box': 'postOfficeBox', 'city': 'l', 'state': 'st', 'zip_code': 'postalCode', 'home_phone': 'homePhone', 'pager': 'pager', 'mobile': 'mobile', 'fax': 'facsimileTelephoneNumber', 'title': 'title', 'department': 'department', 'company': 'company'}
-            attr_name = field_to_attr.get(field.name)
-            if attr_name:
-                field.data = get_attr_value(user, attr_name)
-        return render_template('edit_user.html', form=form, username=username, user_name=get_attr_value(user, 'displayName'), editable_fields=editable_fields)
-    except Exception as e:
-        flash(f"Ocorreu um erro: {e}", "error")
-        logging.error(f"Erro ao editar '{username}': {e}", exc_info=True)
+    conn = get_read_connection()
+    user = get_user_by_samaccountname(conn, username)
+    if not user:
+        flash("Usuário não encontrado.", "error")
         return redirect(url_for('manage_users'))
+    form = EditUserForm()
+    editable_fields = {f.name for f in form if f.type not in ('CSRFTokenField', 'SubmitField') and check_permission(field=f.name)}
+    if request.method == 'POST':
+        for field_name, field in form._fields.items():
+            if field_name not in editable_fields and field_name not in ['csrf_token', 'submit']:
+                field.validators = []
+    if form.validate_on_submit():
+        service_conn = get_service_account_connection()
+        changes = {}
+        field_to_attr = {'first_name': 'givenName', 'last_name': 'sn', 'initials': 'initials', 'display_name': 'displayName', 'description': 'description', 'office': 'physicalDeliveryOfficeName', 'telephone': 'telephoneNumber', 'email': 'mail', 'web_page': 'wWWHomePage', 'street': 'streetAddress', 'post_office_box': 'postOfficeBox', 'city': 'l', 'state': 'st', 'zip_code': 'postalCode', 'home_phone': 'homePhone', 'pager': 'pager', 'mobile': 'mobile', 'fax': 'facsimileTelephoneNumber', 'title': 'title', 'department': 'department', 'company': 'company'}
+        for field_name in editable_fields:
+            if field_name in field_to_attr:
+                attr_name = field_to_attr[field_name]
+                submitted_value = getattr(form, field_name).data
+                original_value = get_attr_value(user, attr_name)
+                if submitted_value != original_value:
+                    changes[attr_name] = [(ldap3.MODIFY_REPLACE, [submitted_value or ''])]
+        if changes:
+            service_conn.modify(user.distinguishedName.value, changes)
+            if service_conn.result['description'] == 'success':
+                flash('Usuário atualizado com sucesso!', 'success')
+                logging.info(f"Usuário '{username}' atualizado por '{session.get('ad_user')}'. Campos: {list(changes.keys())}")
+            else:
+                flash(f"Erro ao atualizar usuário: {service_conn.result['message']}", 'error')
+        else:
+            flash("Nenhum valor foi alterado.", "info")
+        return redirect(url_for('view_user', username=username))
+    for field in form:
+        field_to_attr = {'first_name': 'givenName', 'last_name': 'sn', 'initials': 'initials', 'display_name': 'displayName', 'description': 'description', 'office': 'physicalDeliveryOfficeName', 'telephone': 'telephoneNumber', 'email': 'mail', 'web_page': 'wWWHomePage', 'street': 'streetAddress', 'post_office_box': 'postOfficeBox', 'city': 'l', 'state': 'st', 'zip_code': 'postalCode', 'home_phone': 'homePhone', 'pager': 'pager', 'mobile': 'mobile', 'fax': 'facsimileTelephoneNumber', 'title': 'title', 'department': 'department', 'company': 'company'}
+        attr_name = field_to_attr.get(field.name)
+        if attr_name:
+            field.data = get_attr_value(user, attr_name)
+    return render_template('edit_user.html', form=form, username=username, user_name=get_attr_value(user, 'displayName'), editable_fields=editable_fields)
 
 # ==============================================================================
 # Rotas Apenas para Admin
@@ -1167,43 +1265,41 @@ def admin_logs():
     )
 
 @app.route('/admin/permissions', methods=['GET', 'POST'])
+@handle_ldap_exceptions
 def permissions():
     if 'master_admin' not in session: return redirect(url_for('admin_login'))
     search_form, permissions_form, groups = GroupSearchForm(), FlaskForm(), []
     available_fields = {'first_name': 'Nome', 'last_name': 'Sobrenome', 'initials': 'Iniciais', 'display_name': 'Nome de Exibição', 'description': 'Descrição', 'office': 'Escritório', 'telephone': 'Telefone Principal', 'email': 'E-mail', 'web_page': 'Página da Web', 'street': 'Rua', 'post_office_box': 'Caixa Postal', 'city': 'Cidade', 'state': 'Estado/Província', 'zip_code': 'CEP', 'home_phone': 'Telefone Residencial', 'pager': 'Pager', 'mobile': 'Celular', 'fax': 'Fax', 'title': 'Cargo', 'department': 'Departamento', 'company': 'Empresa'}
-    try:
-        conn = get_service_account_connection()
-        config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
-        if search_form.validate_on_submit() and search_form.submit.data:
-            query = search_form.search_query.data
-            search_filter = f"(&(objectClass=group)(cn=*{query}*))"
-            conn.search(search_base, search_filter, attributes=['cn'])
-            groups = sorted([g.cn.value for g in conn.entries])
-            if not groups: flash(f"Nenhum grupo encontrado com o nome '{query}'.", "info")
-        if permissions_form.validate_on_submit() and request.form.get('save_permissions'):
-            permissions_data = load_permissions()
-            for group in request.form.getlist('searched_groups'):
-                perm_type = request.form.get(f'{group}_perm_type')
-                if perm_type == 'full': permissions_data[group] = {'type': 'full'}
-                elif perm_type == 'custom':
-                    actions = {'can_create': f'{group}_can_create' in request.form, 'can_disable': f'{group}_can_disable' in request.form, 'can_reset_password': f'{group}_can_reset_password' in request.form, 'can_edit': f'{group}_can_edit' in request.form, 'can_manage_groups': f'{group}_can_manage_groups' in request.form}
-                    fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
-                    permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields}
-                elif perm_type == 'none': permissions_data[group] = {'type': 'none'}
-            save_permissions(permissions_data)
-            flash('Permissões salvas com sucesso!', 'success')
-            search_query = request.form.get('search_query_hidden', '')
-            if search_query:
-                 search_filter = f"(&(objectClass=group)(cn=*{search_query}*))"
-                 conn.search(search_base, search_filter, attributes=['cn'])
-                 groups = sorted([g.cn.value for g in conn.entries])
+    conn = get_service_account_connection()
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
+    if search_form.validate_on_submit() and search_form.submit.data:
+        query = search_form.search_query.data
+        safe_query = escape_filter_chars(query)
+        search_filter = f"(&(objectClass=group)(cn=*{safe_query}*))"
+        conn.search(search_base, search_filter, attributes=['cn'])
+        groups = sorted([g.cn.value for g in conn.entries])
+        if not groups: flash(f"Nenhum grupo encontrado com o nome '{query}'.", "info")
+    if permissions_form.validate_on_submit() and request.form.get('save_permissions'):
         permissions_data = load_permissions()
-        return render_template('admin/permissions.html', search_form=search_form, permissions_form=permissions_form, groups=groups, permissions=permissions_data, available_fields=available_fields)
-    except Exception as e:
-        flash(f"Erro ao carregar a página de permissões: {e}", "error")
-        logging.error(f"Erro em /admin/permissions: {e}", exc_info=True)
-        return redirect(url_for('admin_dashboard'))
+        for group in request.form.getlist('searched_groups'):
+            perm_type = request.form.get(f'{group}_perm_type')
+            if perm_type == 'full': permissions_data[group] = {'type': 'full'}
+            elif perm_type == 'custom':
+                actions = {'can_create': f'{group}_can_create' in request.form, 'can_disable': f'{group}_can_disable' in request.form, 'can_reset_password': f'{group}_can_reset_password' in request.form, 'can_edit': f'{group}_can_edit' in request.form, 'can_manage_groups': f'{group}_can_manage_groups' in request.form}
+                fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
+                permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields}
+            elif perm_type == 'none': permissions_data[group] = {'type': 'none'}
+        save_permissions(permissions_data)
+        flash('Permissões salvas com sucesso!', 'success')
+        search_query = request.form.get('search_query_hidden', '')
+        if search_query:
+             safe_query = escape_filter_chars(search_query)
+             search_filter = f"(&(objectClass=group)(cn=*{safe_query}*))"
+             conn.search(search_base, search_filter, attributes=['cn'])
+             groups = sorted([g.cn.value for g in conn.entries])
+    permissions_data = load_permissions()
+    return render_template('admin/permissions.html', search_form=search_form, permissions_form=permissions_form, groups=groups, permissions=permissions_data, available_fields=available_fields)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
