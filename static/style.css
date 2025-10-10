@@ -291,6 +291,11 @@ footer {
     margin-bottom: 2rem;
 }
 
+/* Garante que o texto "muted" seja legível no tema escuro */
+.text-muted {
+    color: var(--text-muted-color) !important;
+}
+
 /* ==========================================================================
    Dashboard Specific Styles
    ========================================================================== */
