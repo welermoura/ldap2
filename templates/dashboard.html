@@ -104,6 +104,12 @@
                     <h6 class="mb-1"><i class="fas fa-layer-group me-2 text-info"></i>Gerenciar Grupos</h6>
                     <small class="text-muted">Adicione ou remova membros de grupos.</small>
                 </a>
+                {% if check_permission(action='can_export_data') %}
+                <a href="{{ url_for('export_ad_data') }}" class="list-group-item list-group-item-action glass-list-item">
+                    <h6 class="mb-1"><i class="fas fa-file-csv me-2 text-success"></i>Exportar Base AD</h6>
+                    <small class="text-muted">Exporte os dados dos usuários para um arquivo CSV.</small>
+                </a>
+                {% endif %}
             </div>
         </div>
     </div>

@@ -311,3 +311,28 @@ footer {
 .dashboard-card .card-title {
     color: var(--text-color);
 }
+
+.dashboard-stat-card {
+    cursor: pointer;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.dashboard-stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+}
+
+.list-group-item {
+    background-color: var(--input-background);
+    border-color: var(--glass-border-color);
+    color: var(--text-color);
+}
+
+.list-group-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+
+.page-indicator {
+    color: var(--text-color);
+}
