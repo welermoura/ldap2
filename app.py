@@ -673,6 +673,53 @@ def dashboard():
 
     return render_template('dashboard.html', dashboard_data=dashboard_data)
 
+@app.route('/api/dashboard_list/<category>')
+@require_auth
+def api_dashboard_list(category):
+    permission_map = {
+        'active_users': 'can_view_user_stats',
+        'disabled_users': 'can_view_user_stats',
+        'locked_users': 'can_view_locked_accounts'
+    }
+    required_permission = permission_map.get(category)
+    if not required_permission or not check_permission(view=required_permission):
+        return jsonify({'error': 'Permissão negada.'}), 403
+
+    try:
+        conn = get_read_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+        search_filter = ''
+
+        if category == 'active_users':
+            search_filter = '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))'
+        elif category == 'disabled_users':
+            search_filter = '(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))'
+        elif category == 'locked_users':
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
+            delta = seven_days_ago - epoch_start
+            filetime_timestamp = int(delta.total_seconds() * 10_000_000)
+            search_filter = f"(&(objectClass=user)(objectCategory=person)(lockoutTime>={filetime_timestamp}))"
+        else:
+            return jsonify({'error': 'Categoria inválida.'}), 400
+
+        entry_generator = conn.extend.standard.paged_search(
+            search_base=search_base,
+            search_filter=search_filter,
+            attributes=['cn', 'sAMAccountName'],
+            paged_size=1000,
+            generator=True
+        )
+
+        users = [{'cn': get_attr_value(entry, 'cn'), 'sam': get_attr_value(entry, 'sAMAccountName')} for entry in entry_generator if get_attr_value(entry, 'sAMAccountName')]
+        return jsonify(sorted(users, key=lambda x: x.get('cn', '').lower()))
+
+    except Exception as e:
+        logging.error(f"Erro na API de lista do dashboard para a categoria '{category}': {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_create')

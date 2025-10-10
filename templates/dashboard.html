@@ -175,8 +175,8 @@ document.addEventListener('DOMContentLoaded', function() {
         modalSearchInput.addEventListener('input', () => {
             const query = modalSearchInput.value.toLowerCase();
             const filteredData = allModalData.filter(item =>
-                item.cn.toLowerCase().includes(query) ||
-                item.sam.toLowerCase().includes(query)
+                (item.cn && item.cn.toLowerCase().includes(query)) ||
+                (item.sam && item.sam.toLowerCase().includes(query))
             );
             renderModalList(filteredData);
         });
@@ -192,7 +192,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 const response = await fetch(`/api/dashboard_list/${category}`);
-                if (!response.ok) throw new Error('Falha ao carregar dados.');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Falha ao carregar dados.');
+                }
 
                 allModalData = await response.json();
                 renderModalList(allModalData);
@@ -205,8 +208,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Lógica para a lista de senhas expirando
     const expiringPasswordsData = {{ dashboard_data.expiring_passwords|tojson|default([]) }};
-    const listContainer = document.getElementById('expiring-list-container');
-    const paginationControls = document.getElementById('expiring-pagination-controls');
+    if (document.getElementById('expiring-list-container')) {
+        const listContainer = document.getElementById('expiring-list-container');
+        const paginationControls = document.getElementById('expiring-pagination-controls');
     const searchInput = document.getElementById('expiring-search-input');
     const totalBadge = document.getElementById('expiring-total');
 
