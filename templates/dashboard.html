@@ -14,12 +14,13 @@
 {% block content %}
 <!-- Linha dos Cards de Estatísticas -->
 <div class="row">
+    {% if dashboard_data.user_stats is not none %}
     <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="active_users" data-title="Contas Ativas">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <div class="text-muted text-uppercase fs-7">Contas Ativas</div>
-                    <div class="fs-2 fw-bold text-success">{{ active_users }}</div>
+                    <div class="fs-2 fw-bold text-success">{{ dashboard_data.user_stats.active }}</div>
                 </div>
                 <div class="fs-2 text-success opacity-75"><i class="fas fa-user-check"></i></div>
             </div>
@@ -30,44 +31,50 @@
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <div class="text-muted text-uppercase fs-7">Contas Desativadas</div>
-                    <div class="fs-2 fw-bold text-warning">{{ disabled_users }}</div>
+                    <div class="fs-2 fw-bold text-warning">{{ dashboard_data.user_stats.disabled }}</div>
                 </div>
                 <div class="fs-2 text-warning opacity-75"><i class="fas fa-user-slash"></i></div>
             </div>
         </div>
     </div>
+    {% endif %}
+    {% if dashboard_data.locked_accounts is not none %}
     <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="locked_users" data-title="Contas Bloqueadas (Total)">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <div class="text-muted text-uppercase fs-7">Bloqueados na Última Semana</div>
-                    <div class="fs-2 fw-bold text-danger">{{ locked_last_week }}</div>
+                    <div class="fs-2 fw-bold text-danger">{{ dashboard_data.locked_accounts }}</div>
                 </div>
                 <div class="fs-2 text-danger opacity-75"><i class="fas fa-user-clock"></i></div>
             </div>
         </div>
     </div>
+    {% endif %}
+    {% if dashboard_data.pending_reactivations is not none %}
     <div class="col-lg-3 col-md-6 mb-4">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <div class="text-muted text-uppercase fs-7">Reativações (Próx. 7 dias)</div>
-                    <div class="fs-2 fw-bold text-info">{{ pending_reactivations }}</div>
+                    <div class="fs-2 fw-bold text-info">{{ dashboard_data.pending_reactivations }}</div>
                 </div>
                 <div class="fs-2 text-info opacity-75"><i class="fas fa-calendar-check"></i></div>
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 
 <!-- Linha dos Painéis Principais -->
 <div class="row">
     <!-- Painel de Senhas Expirando -->
+    {% if dashboard_data.expiring_passwords is not none %}
     <div class="col-lg-8 mb-4">
         <div class="card glass-card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-key me-2 text-warning"></i>Senhas Expirando (Próximos 15 dias)</h5>
-                <span id="expiring-total" class="badge bg-dark rounded-pill">Total: {{ expiring_passwords|length }}</span>
+                <span id="expiring-total" class="badge bg-dark rounded-pill">Total: {{ dashboard_data.expiring_passwords|length }}</span>
             </div>
             <div class="card-body p-0" style="min-height: 250px;">
                 <div id="expiring-list-container" class="list-group list-group-flush">
@@ -84,6 +91,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <!-- Painel de Ações Rápidas -->
     <div class="col-lg-4 mb-4">
@@ -196,7 +204,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Lógica para a lista de senhas expirando
-    const expiringPasswordsData = {{ expiring_passwords|tojson }};
+    const expiringPasswordsData = {{ dashboard_data.expiring_passwords|tojson|default([]) }};
     const listContainer = document.getElementById('expiring-list-container');
     const paginationControls = document.getElementById('expiring-pagination-controls');
     const searchInput = document.getElementById('expiring-search-input');

@@ -637,25 +637,41 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
+    dashboard_data = {
+        'user_stats': None,
+        'locked_accounts': None,
+        'pending_reactivations': None,
+        'expiring_passwords': None
+    }
+
     try:
+        # A conexão só é necessária se o usuário tiver permissão para ver pelo menos um card que precise dela.
+        # Simplificando, vamos pegar a conexão e usá-la conforme necessário.
         conn = get_read_connection()
-        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
-        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
-        locked_last_week = get_accounts_locked_in_last_week(conn)
-        pending_reactivations = get_pending_reactivations(days=7)
-        expiring_passwords = get_expiring_passwords(conn, days=15)
+
+        if check_permission(view='can_view_user_stats'):
+            stats = get_dashboard_stats(conn)
+            dashboard_data['user_stats'] = {
+                'active': stats.get('enabled_users', 0),
+                'disabled': stats.get('disabled_users', 0)
+            }
+
+        if check_permission(view='can_view_locked_accounts'):
+            dashboard_data['locked_accounts'] = get_accounts_locked_in_last_week(conn)
+
+        if check_permission(view='can_view_pending_reactivations'):
+            # Esta função não precisa da conexão AD, pois lê do arquivo de agendamento local.
+            dashboard_data['pending_reactivations'] = get_pending_reactivations(days=7)
+
+        if check_permission(view='can_view_expiring_passwords'):
+            dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=15)
+
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
+        # Zera os dados em caso de erro para não mostrar informações parciais.
+        dashboard_data = {key: None for key in dashboard_data}
 
-    return render_template(
-        'dashboard.html',
-        active_users=active_users,
-        disabled_users=disabled_users,
-        locked_last_week=locked_last_week,
-        pending_reactivations=pending_reactivations,
-        expiring_passwords=expiring_passwords
-    )
+    return render_template('dashboard.html', dashboard_data=dashboard_data)
 
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
@@ -1371,6 +1387,14 @@ def permissions():
         'pager': 'Pager', 'mobile': 'Celular', 'fax': 'Fax', 'title': 'Cargo',
         'department': 'Departamento', 'company': 'Empresa'
     }
+    available_views = {
+        'can_export_data': 'Exportar Dados AD',
+        'can_view_user_stats': 'Ver Card: Estatísticas de Usuários',
+        'can_view_locked_accounts': 'Ver Card: Contas Bloqueadas',
+        'can_view_pending_reactivations': 'Ver Card: Reativações Pendentes',
+        'can_view_expiring_passwords': 'Ver Card: Senhas Expirando'
+    }
+
 
     try:
         conn = get_service_account_connection()
@@ -1400,8 +1424,10 @@ def permissions():
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
                     }
+                    # Atualizado para iterar sobre o dicionário de visualizações disponíveis
                     views = {
-                        'can_export_data': f'{group}_can_export_data' in request.form
+                        view_key: f'{group}_view_{view_key}' in request.form
+                        for view_key in available_views
                     }
                     fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
                     permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields, 'views': views}
@@ -1425,7 +1451,8 @@ def permissions():
             permissions_form=permissions_form,
             groups=groups,
             permissions=permissions_data,
-            available_fields=available_fields
+            available_fields=available_fields,
+            available_views=available_views # Passa as views para o template
         )
 
     except Exception as e:
