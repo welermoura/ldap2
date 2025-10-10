@@ -1541,7 +1541,7 @@ def export_ad_data():
         for entry in entry_generator:
             # Log de diagnóstico para o primeiro usuário encontrado.
             if not first_entry_logged:
-                logging.info(f"Dados brutos do primeiro usuário para diagnóstico: {entry.entry_raw_attributes}")
+                logging.info(f"Dados brutos do primeiro usuário para diagnóstico: {entry['raw_attributes']}")
                 first_entry_logged = True
 
             row = []
