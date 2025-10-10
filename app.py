@@ -14,6 +14,8 @@ from functools import wraps
 import re
 from cryptography.fernet import Fernet
 import secrets
+import io
+import csv
 
 # ==============================================================================
 # Configuração Base
@@ -1176,6 +1178,78 @@ def admin_logout():
     flash('Você foi desconectado do painel de administração.', 'info')
     return redirect(url_for('admin_login'))
 
+# ==============================================================================
+# Rota de Exportação de Dados
+# ==============================================================================
+@app.route('/export_ad_data')
+@require_auth
+@require_permission(action='can_export_data')
+@handle_ldap_exceptions
+def export_ad_data():
+    """
+    Busca todos os usuários no AD com um conjunto específico de atributos
+    e retorna os dados como um arquivo CSV para download.
+    """
+    from flask import Response
+    conn = get_service_account_connection()
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
+
+    header = [
+        'Nome Completo', 'Login', 'Status da Conta', 'Departamento', 'Cargo',
+        'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição',
+        'Data de Criação', 'Último Logon', 'Senha Expira em'
+    ]
+    attributes = [
+        'displayName', 'sAMAccountName', 'userAccountControl', 'department', 'title',
+        'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description',
+        'whenCreated', 'lastLogonTimestamp', 'msDS-UserPasswordExpiryTimeComputed'
+    ]
+
+    search_filter = '(&(objectClass=user)(objectCategory=person))'
+
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+    writer.writerow(header)
+
+    entry_generator = conn.extend.standard.paged_search(
+        search_base=search_base,
+        search_filter=search_filter,
+        attributes=attributes,
+        paged_size=500
+    )
+
+    for entry in entry_generator:
+        row = []
+        for attr in attributes:
+            value = get_attr_value(entry, attr)
+            if attr == 'userAccountControl':
+                value = "Desativado" if value and (int(value) & 2) else "Ativo"
+            elif attr in ['whenCreated', 'lastLogonTimestamp']:
+                dt_obj = filetime_to_datetime(value)
+                value = dt_obj.strftime('%d/%m/%Y %H:%M:%S') if dt_obj else 'Nunca'
+            elif attr == 'msDS-UserPasswordExpiryTimeComputed':
+                dt_obj = filetime_to_datetime(value)
+                if dt_obj:
+                    if datetime.now(timezone.utc) > dt_obj:
+                        delta = datetime.now(timezone.utc) - dt_obj
+                        value = f"Expirou há {delta.days} dias"
+                    else:
+                        delta = dt_obj - datetime.now(timezone.utc)
+                        value = f"Expira em {delta.days} dias"
+                else:
+                    value = 'Nunca'
+            row.append(str(value) or '')
+        writer.writerow(row)
+
+    output.seek(0)
+
+    return Response(
+        output,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"}
+    )
+
 @app.route('/admin/change_password', methods=['GET', 'POST'])
 def admin_change_password():
     if 'master_admin' not in session: return redirect(url_for('admin_login'))
@@ -1286,7 +1360,14 @@ def permissions():
             perm_type = request.form.get(f'{group}_perm_type')
             if perm_type == 'full': permissions_data[group] = {'type': 'full'}
             elif perm_type == 'custom':
-                actions = {'can_create': f'{group}_can_create' in request.form, 'can_disable': f'{group}_can_disable' in request.form, 'can_reset_password': f'{group}_can_reset_password' in request.form, 'can_edit': f'{group}_can_edit' in request.form, 'can_manage_groups': f'{group}_can_manage_groups' in request.form}
+                    actions = {
+                        'can_create': f'{group}_can_create' in request.form,
+                        'can_disable': f'{group}_can_disable' in request.form,
+                        'can_reset_password': f'{group}_can_reset_password' in request.form,
+                        'can_edit': f'{group}_can_edit' in request.form,
+                        'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_export_data': f'{group}_can_export_data' in request.form
+                    }
                 fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
                 permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields}
             elif perm_type == 'none': permissions_data[group] = {'type': 'none'}
