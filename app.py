@@ -1223,22 +1223,31 @@ def export_ad_data():
         row = []
         for attr in attributes:
             value = get_attr_value(entry, attr)
+
+            # Processamento seguro para cada atributo
             if attr == 'userAccountControl':
                 value = "Desativado" if value and (int(value) & 2) else "Ativo"
-            elif attr in ['whenCreated', 'lastLogonTimestamp']:
-                dt_obj = filetime_to_datetime(value)
-                value = dt_obj.strftime('%d/%m/%Y %H:%M:%S') if dt_obj else 'Nunca'
-            elif attr == 'msDS-UserPasswordExpiryTimeComputed':
-                dt_obj = filetime_to_datetime(value)
-                if dt_obj:
-                    if datetime.now(timezone.utc) > dt_obj:
-                        delta = datetime.now(timezone.utc) - dt_obj
-                        value = f"Expirou há {delta.days} dias"
+            elif attr in ['whenCreated', 'lastLogonTimestamp', 'msDS-UserPasswordExpiryTimeComputed']:
+                dt_obj = None
+                if value: # Garante que o valor não seja uma string vazia
+                    try:
+                        dt_obj = filetime_to_datetime(value)
+                    except (ValueError, TypeError):
+                        dt_obj = None # Ignora valores malformados
+
+                if attr == 'msDS-UserPasswordExpiryTimeComputed':
+                    if dt_obj:
+                        if datetime.now(timezone.utc) > dt_obj:
+                            delta = datetime.now(timezone.utc) - dt_obj
+                            value = f"Expirou há {delta.days} dia(s)"
+                        else:
+                            delta = dt_obj - datetime.now(timezone.utc)
+                            value = f"Expira em {delta.days} dia(s)"
                     else:
-                        delta = dt_obj - datetime.now(timezone.utc)
-                        value = f"Expira em {delta.days} dias"
-                else:
-                    value = 'Nunca'
+                        value = 'Nunca'
+                else: # Aplica-se a whenCreated e lastLogonTimestamp
+                    value = dt_obj.strftime('%d/%m/%Y %H:%M:%S') if dt_obj else 'Nunca'
+
             row.append(str(value) or '')
         writer.writerow(row)
 
