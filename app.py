@@ -1523,27 +1523,21 @@ def export_ad_data():
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
 
-        # Filtro LDAP simplificado para garantir que os campos essenciais existam.
-        search_filter = "(&(objectClass=user)(objectCategory=person)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*))"
+        # Filtro simplificado para buscar todos os usuários, conforme solicitado.
+        search_filter = "(&(objectClass=user)(objectCategory=person))"
 
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-
-        # Atributos que correspondem ao cabeçalho do CSV
-        attributes_for_csv = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
-
-        # Atributos a serem buscados do AD: inclui os do CSV e 'sn' (necessário para o filtro).
-        attributes_to_fetch = list(set(attributes_for_csv + ['sn']))
+        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
-        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes_to_fetch, paged_size=500)
+        entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
 
         for entry in entry_generator:
             row = []
-            # Itera sobre a lista original para manter a ordem do CSV
-            for attr in attributes_for_csv:
+            for attr in attributes:
                 value = get_attr_value(entry, attr)
                 if attr == 'userAccountControl':
                     try:
@@ -1559,9 +1553,8 @@ def export_ad_data():
                         value = 'Data Inválida'
                 row.append(str(value) or '')
 
-            # Verificação de segurança: Apenas escreve a linha se ela contiver algum dado real.
-            if any(field for field in row if field and field not in ["Desconhecido", "Data Inválida", "Nunca"]):
-                writer.writerow(row)
+            # Removemos a verificação para garantir que todos os usuários sejam exportados.
+            writer.writerow(row)
 
         output.seek(0)
         return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
