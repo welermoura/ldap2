@@ -705,31 +705,29 @@ def index():
 @require_auth
 @handle_ldap_exceptions
 def dashboard():
-    stats = {'enabled_users': 'N/A', 'disabled_users': 'N/A'}
-    expiring_passwords = []
-    locked_last_week_count = 'N/A'
-    pending_reactivation_count = 'N/A'
-
     conn = get_read_connection()
-    stats = get_dashboard_stats(conn)
-    stats['locked_accounts'] = get_locked_accounts(conn)
 
+    # Coleta as estatísticas principais
+    stats = get_dashboard_stats(conn)
     locked_last_week_count = get_accounts_locked_in_last_week(conn)
     pending_reactivation_count = get_pending_reactivations(days=7)
 
-    # Este try/except é mantido para a mensagem de erro específica.
+    # Coleta a lista de senhas expirando
+    expiring_passwords = []
     try:
         expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
-        flash("Não foi possível carregar a lista de senhas expirando. O filtro pode ser incompatível.", "warning")
+        # Mantém a mensagem de erro específica para este caso
+        flash("Aviso: Não foi possível carregar a lista de senhas expirando. O filtro pode ser incompatível com o seu ambiente AD.", "warning")
         logging.error(f"Falha ao carregar senhas expirando: {e}", exc_info=True)
 
     return render_template(
         'dashboard.html',
-        stats=stats,
-        expiring_passwords=expiring_passwords,
-        locked_last_week_count=locked_last_week_count,
-        pending_reactivation_count=pending_reactivation_count
+        active_users=stats.get('enabled_users', 0),
+        disabled_users=stats.get('disabled_users', 0),
+        locked_last_week=locked_last_week_count,
+        pending_reactivations=pending_reactivation_count,
+        expiring_passwords=expiring_passwords
     )
 
 @app.route('/api/dashboard_list/<category>')
@@ -1166,6 +1164,7 @@ def admin_login():
     return render_template('admin/login.html', form=form)
 
 @app.route('/admin/dashboard')
+@handle_ldap_exceptions
 def admin_dashboard():
     if 'master_admin' not in session: return redirect(url_for('admin_login'))
     return render_template('admin/dashboard.html')
