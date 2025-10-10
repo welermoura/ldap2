@@ -1522,13 +1522,30 @@ def export_ad_data():
         conn = get_service_account_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        search_filter = "(&(&(|(&(objectCategory=person)(objectSid=*)(!samAccountType:1.2.840.113556.1.4.804:=3))(&(objectCategory=person)(!objectSid=*))(&(objectCategory=group)(groupType:1.2.840.113556.1.4.804:=14)))(objectCategory=user)(objectClass=user)(department=*)(telephoneNumber=*)(mail=*)(sn=*)(description=*)(title=*)))"
+
+        # Apenas exporta usuários que possuem um valor para todos os campos especificados.
+        # A lista de atributos obrigatórios foi baseada na solicitação do usuário.
+        required_attrs = [
+            'givenName', 'sn', 'initials', 'displayName', 'description',
+            'physicalDeliveryOfficeName', 'telephoneNumber', 'mail', 'wWWHomePage',
+            'streetAddress', 'postOfficeBox', 'l', 'st', 'postalCode', 'homePhone',
+            'pager', 'mobile', 'facsimileTelephoneNumber', 'title', 'department', 'company'
+        ]
+
+        # Constrói a string do filtro: (&(objectClass=user)(objectCategory=person)(givenName=*)(sn=*) ... )
+        attr_filter_parts = "".join([f'({attr}=*)' for attr in required_attrs])
+        search_filter = f"(&(objectClass=user)(objectCategory=person){attr_filter_parts})"
+
         header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
+        # Os atributos a serem retornados para o arquivo CSV. Esta lista é mantida como estava.
         attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
+
         entry_generator = conn.extend.standard.paged_search(search_base=search_base, search_filter=search_filter, attributes=attributes, paged_size=500)
+
         for entry in entry_generator:
             row = []
             for attr in attributes:
@@ -1547,6 +1564,7 @@ def export_ad_data():
                         value = 'Data Inválida'
                 row.append(str(value) or '')
             writer.writerow(row)
+
         output.seek(0)
         return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
     except Exception as e:
