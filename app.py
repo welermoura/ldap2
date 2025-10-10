@@ -1014,7 +1014,8 @@ def filetime_to_datetime(ft):
     HUNDREDS_OF_NANOSECONDS = 10000000
     if ft is None or int(ft) == 0 or int(ft) == 9223372036854775807:
         return None
-    return datetime.utcfromtimestamp((int(ft) - EPOCH_AS_FILETIME) / HUNDREDS_OF_NANOSECONDS)
+    # Retorna um datetime "aware" em UTC para evitar erros de comparação
+    return datetime.fromtimestamp((int(ft) - EPOCH_AS_FILETIME) / HUNDREDS_OF_NANOSECONDS, tz=timezone.utc)
 
 @app.route('/view_user/<username>')
 @require_auth
