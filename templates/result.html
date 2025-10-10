@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Usuário Criado com Sucesso - Gestão AD{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-check-circle text-success me-2"></i>Usuário Criado com Sucesso!</h1>
+    <div>
+        <a href="{{ url_for('create_user_form') }}" class="btn btn-secondary"><i class="fas fa-plus me-2"></i>Criar Outro Usuário</a>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="alert alert-success">
+    {{ result.message }}
+</div>
+
+<div class="card glass-card">
+    <div class="card-header">
+        <h5 class="mb-0">Detalhes do Novo Usuário</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table glass-table table-borderless">
+                <tbody>
+                    <tr>
+                        <td style="width: 25%;"><strong>Nome de Exibição:</strong></td>
+                        <td>{{ result.display_name }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Login (sAMAccountName):</strong></td>
+                        <td>{{ result.sam_account }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Senha Temporária:</strong></td>
+                        <td>
+                            <strong id="temp-password" class="text-highlight fs-5 me-3">{{ result.password }}</strong>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copyPassword()">
+                                <i class="fas fa-copy me-1"></i> Copiar
+                            </button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>E-mail:</strong></td>
+                        <td>{{ result.email }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Iniciais:</strong></td>
+                        <td>{{ result.initials }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Localização (OU):</strong></td>
+                        <td>{{ result.ou_path }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="mt-3 text-muted"><i class="fas fa-info-circle me-1"></i><strong>Atenção:</strong> A senha gerada é temporária. O usuário será solicitado a alterá-la no primeiro acesso.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyPassword() {
+    const passwordEl = document.getElementById('temp-password');
+    navigator.clipboard.writeText(passwordEl.innerText).then(() => {
+        // Optional: give user feedback
+        const originalText = passwordEl.nextElementSibling.innerHTML;
+        passwordEl.nextElementSibling.innerHTML = '<i class="fas fa-check me-1"></i> Copiado!';
+        setTimeout(() => {
+            passwordEl.nextElementSibling.innerHTML = originalText;
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+    });
+}
+</script>
+{% endblock %}

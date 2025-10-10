@@ -1,0 +1,6 @@
+Flask
+Flask-WTF
+ldap3
+werkzeug
+cryptography
+Flask-Kerberos

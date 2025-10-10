@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_form_helpers.html" import render_field, render_submit_button %}
+
+{% block title %}Logs do Sistema - Admin{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-clipboard-list me-2"></i>Logs do Sistema</h1>
+    <div>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Home</a>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Painel</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('admin_logs') }}" class="d-flex">
+            {{ search_form.hidden_tag() }}
+            <div class="flex-grow-1 me-2">
+                {{ render_field(search_form.search_query, placeholder="Filtrar por usuário, ação, etc.", label_visible=false) }}
+            </div>
+            {{ render_submit_button(search_form.submit, class="btn btn-primary btn-lg") }}
+        </form>
+    </div>
+</div>
+
+<div class="card glass-card">
+    <div class="card-header">
+        <h5 class="mb-0">Registros de Atividade</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover glass-table mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 20%;">Timestamp</th>
+                        <th>Mensagem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if logs %}
+                        {% for log_entry in logs %}
+                        <tr>
+                            <td>{{ log_entry.timestamp }}</td>
+                            <td>{{ log_entry.message }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="2" class="text-center p-4">
+                                <i class="fas fa-info-circle me-2"></i>Nenhum registro de log encontrado ou correspondente à sua busca.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

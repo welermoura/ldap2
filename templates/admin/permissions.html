@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% from "_form_helpers.html" import render_field, render_submit_button %}
+
+{% block title %}Gerenciar Permissões - Admin{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-user-shield me-2"></i>Gerenciar Permissões de Grupo</h1>
+    <div>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Home</a>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Painel</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <p class="card-text">Para evitar lentidão, busque por um grupo específico para ver ou editar suas permissões.</p>
+        <form method="POST" action="{{ url_for('permissions') }}" class="d-flex">
+            {{ search_form.hidden_tag() }}
+            <div class="flex-grow-1 me-2">
+                {{ render_field(search_form.search_query, placeholder="Buscar por nome do grupo...", label_visible=false) }}
+            </div>
+            {{ render_submit_button(search_form.submit, class="btn btn-primary btn-lg", value='Buscar') }}
+        </form>
+    </div>
+</div>
+
+{% if groups %}
+<div class="card glass-card">
+    <div class="card-header">
+        <h5 class="mb-0">Resultados da Busca para: "{{ request.form.search_query or request.args.get('search_query') }}"</h5>
+    </div>
+    <form method="POST" action="{{ url_for('permissions') }}">
+        {{ permissions_form.hidden_tag() }}
+        <input type="hidden" name="save_permissions" value="true">
+        <input type="hidden" name="search_query_hidden" value="{{ request.form.search_query or request.args.get('search_query') }}">
+
+        <div class="accordion" id="permissions-accordion">
+            {% for group in groups %}
+            {% set group_id = "group-" ~ loop.index %}
+            {% set current_perm = permissions.get(group, {}).get('type', 'none') %}
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="heading-{{ group_id }}">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-{{ group_id }}">
+                        {{ group }}
+                        <span class="ms-auto me-3">
+                            <span class="badge rounded-pill bg-{% if current_perm == 'full' %}success{% elif current_perm == 'custom' %}info{% else %}secondary{% endif %}">
+                                {{ {'full': 'Acesso Total', 'custom': 'Personalizado', 'none': 'Sem Acesso'}[current_perm] }}
+                            </span>
+                        </span>
+                    </button>
+                </h2>
+                <div id="collapse-{{ group_id }}" class="accordion-collapse collapse" data-bs-parent="#permissions-accordion">
+                    <div class="accordion-body">
+                        <input type="hidden" name="searched_groups" value="{{ group }}">
+                        <div class="d-flex justify-content-center gap-3 mb-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="{{ group }}_perm_type" id="{{ group_id }}_none" value="none" {% if current_perm == 'none' %}checked{% endif %} onchange="toggleCustom(this)">
+                                <label class="form-check-label" for="{{ group_id }}_none">Sem Acesso</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="{{ group }}_perm_type" id="{{ group_id }}_full" value="full" {% if current_perm == 'full' %}checked{% endif %} onchange="toggleCustom(this)">
+                                <label class="form-check-label" for="{{ group_id }}_full">Acesso Total</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="{{ group }}_perm_type" id="{{ group_id }}_custom" value="custom" {% if current_perm == 'custom' %}checked{% endif %} onchange="toggleCustom(this)">
+                                <label class="form-check-label" for="{{ group_id }}_custom">Personalizado</label>
+                            </div>
+                        </div>
+
+                        <div class="custom-permissions" style="display: {% if current_perm == 'custom' %}block{% else %}none{% endif %};">
+                            <hr>
+                            <h6 class="mb-3">Ações Permitidas</h6>
+                            <div class="row">
+                                {% set actions = permissions.get(group, {}).get('actions', {}) %}
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_create" {% if actions.get('can_create') %}checked{% endif %}><label class="form-check-label">Criar Usuário</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_edit" {% if actions.get('can_edit') %}checked{% endif %}><label class="form-check-label">Editar Usuário</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_disable" {% if actions.get('can_disable') %}checked{% endif %}><label class="form-check-label">Ativar/Desativar</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_reset_password" {% if actions.get('can_reset_password') %}checked{% endif %}><label class="form-check-label">Resetar Senha</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_manage_groups" {% if actions.get('can_manage_groups') %}checked{% endif %}><label class="form-check-label">Gerenciar Grupos</label></div>
+                            </div>
+                            <hr>
+                            <h6 class="mb-3">Visualização no Dashboard</h6>
+                            <div class="row">
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_active" {% if actions.get('can_view_active') %}checked{% endif %}><label class="form-check-label">Ver Contas Ativas</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_disabled" {% if actions.get('can_view_disabled') %}checked{% endif %}><label class="form-check-label">Ver Contas Desativadas</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_locked_week" {% if actions.get('can_view_locked_week') %}checked{% endif %}><label class="form-check-label">Ver Bloqueados na Semana</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_reactivations" {% if actions.get('can_view_reactivations') %}checked{% endif %}><label class="form-check-label">Ver Próximas Reativações</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_expiring_pass" {% if actions.get('can_view_expiring_pass') %}checked{% endif %}><label class="form-check-label">Ver Senhas Expirando</label></div>
+                            </div>
+                            <hr>
+                            <h6 class="mb-3">Campos Editáveis</h6>
+                            <div class="row">
+                                {% set fields = permissions.get(group, {}).get('fields', []) %}
+                                {% for field, label in available_fields.items() %}
+                                    <div class="col-md-4 form-check">
+                                        <input class="form-check-input" type="checkbox" name="{{ group }}_field_{{ field }}" {% if field in fields %}checked{% endif %}>
+                                        <label class="form-check-label">{{ label }}</label>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="card-footer text-end">
+            <input type="submit" class="btn btn-primary btn-lg" value="Salvar Permissões">
+        </div>
+    </form>
+</div>
+{% elif search_form.search_query.data %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle me-2"></i>Nenhum grupo encontrado com o nome '{{ search_form.search_query.data }}'.
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleCustom(radioElement) {
+        const accordionBody = radioElement.closest('.accordion-body');
+        if (!accordionBody) return;
+
+        const customDiv = accordionBody.querySelector('.custom-permissions');
+        if (!customDiv) return;
+
+        const isCustom = radioElement.value === 'custom';
+        customDiv.style.display = isCustom ? 'block' : 'none';
+    }
+</script>
+<style>
+    .accordion-item {
+        background-color: transparent !important;
+        border: 1px solid var(--glass-border-color) !important;
+    }
+    .accordion-button {
+        background-color: rgba(0,0,0,0.2) !important;
+        color: var(--text-color) !important;
+    }
+    .accordion-button:not(.collapsed) {
+        box-shadow: none !important;
+    }
+    .accordion-button::after {
+        filter: invert(1) grayscale(100%) brightness(200%);
+    }
+    .accordion-body {
+        background-color: rgba(0,0,0,0.1);
+    }
+    .form-check {
+        padding-left: 2.5em;
+    }
+    .accordion-body .form-check-label,
+    .accordion-body h6 {
+        color: var(--text-color);
+    }
+</style>
+{% endblock %}
