@@ -172,26 +172,26 @@ def save_permissions(permissions):
 # ==============================================================================
 # Lógica de Permissões (sem alteração)
 # ==============================================================================
-def user_has_any_permission(user_groups):
+def get_user_access_level(user_groups):
     """
-    Verifica se o usuário pode fazer login.
-    O login é permitido se o usuário pertencer a PELO MENOS UM grupo
-    que tenha a permissão 'full' ou 'custom' definida.
-    Grupos com 'none' ou sem regra definida não concedem acesso.
+    Determina o nível de acesso mais alto de um usuário com base em seus grupos.
+    Retorna 'full', 'custom', ou 'none'.
+    A ordem de precedência é: full > custom > none.
     """
     permissions = load_permissions()
-    if not permissions:
-        # Se nenhuma permissão estiver configurada, NEGA o acesso por padrão.
-        return False
-    if not user_groups:
-        return False
+    if not user_groups or not permissions:
+        return 'none'
 
+    access_levels = {'none'}  # Começa com o nível mais baixo
     for group in user_groups:
-        rule = permissions.get(group)
-        if rule and rule.get('type') in ['full', 'custom']:
-            return True # Encontrou um grupo que concede acesso, permite o login.
+        rule = permissions.get(group, {})
+        access_levels.add(rule.get('type', 'none'))
 
-    return False # Nenhum dos grupos do usuário tinha permissão de login.
+    if 'full' in access_levels:
+        return 'full'
+    if 'custom' in access_levels:
+        return 'custom'
+    return 'none'
 
 def check_permission(action=None, field=None, view=None):
     user_groups = session.get('user_groups', [])
@@ -264,6 +264,40 @@ def inject_attr_value_getter():
 @app.context_processor
 def inject_permission_checker():
     return dict(check_permission=check_permission)
+
+@app.context_processor
+def inject_access_level():
+    return dict(access_level=session.get('access_level', 'none'))
+
+@app.route('/catalogo')
+@require_auth
+def address_book():
+    try:
+        conn = get_read_connection()
+
+        # Filtro para garantir que apenas usuários com dados essenciais apareçam no catálogo
+        search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
+
+        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
+
+        entry_generator = conn.extend.standard.paged_search(
+            search_base=config.get('AD_SEARCH_BASE'),
+            search_filter=search_filter,
+            attributes=attributes_to_fetch,
+            paged_size=1000,
+            generator=True
+        )
+
+        users = [entry.entry_attributes_as_dict for entry in entry_generator]
+        # Ordena os usuários pelo nome de exibição
+        sorted_users = sorted(users, key=lambda u: u.get('displayName', [''])[0].lower())
+
+    except Exception as e:
+        flash("Ocorreu um erro ao carregar o catálogo de endereços. Por favor, contate o administrador.", "error")
+        logging.error(f"Erro ao carregar o catálogo de endereços: {e}", exc_info=True)
+        sorted_users = []
+
+    return render_template('catalogo.html', users=sorted_users)
 
 # ==============================================================================
 # Validadores Customizados e Funções Auxiliares (sem alteração)
@@ -565,14 +599,23 @@ def login():
 
             user_groups = [g.split(',')[0].split('=')[1] for g in user_object.memberOf.values] if 'memberOf' in user_object and user_object.memberOf.value else []
 
-            if not user_has_any_permission(user_groups):
-                flash('Você não tem permissão para acessar o sistema.', 'error')
-                return redirect(url_for('login'))
+            access_level = get_user_access_level(user_groups)
 
-            # Armazena o DN para referência interna e o displayName para exibição
+            if access_level == 'none':
+                # Permite login, mas redireciona para o catálogo
+                session['ad_user'] = user_object.entry_dn
+                session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
+                session['user_groups'] = user_groups
+                session['access_level'] = access_level
+                session['sso_login'] = False
+                flash('Bem-vindo ao Catálogo de Endereços!', 'info')
+                return redirect(url_for('address_book'))
+
+            # Armazena o DN, nome de exibição, grupos e nível de acesso na sessão
             session['ad_user'] = user_object.entry_dn
             session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
             session['user_groups'] = user_groups
+            session['access_level'] = access_level
             session['sso_login'] = False
             flash('Login realizado com sucesso!', 'success')
             return redirect(url_for('dashboard'))
@@ -614,16 +657,22 @@ def sso_login():
 
         user_groups = [g.split(',')[0].split('=')[1] for g in user_object.memberOf.values] if 'memberOf' in user_object and user_object.memberOf.value else []
 
-        if not user_has_any_permission(user_groups):
-            flash('Você não tem permissão para acessar o sistema.', 'error')
-            logging.warning(f"Tentativa de login SSO para o usuário '{username}' falhou devido à falta de permissões.")
-            return redirect(url_for('login'))
+        access_level = get_user_access_level(user_groups)
 
-        # Armazena o DN para referência interna e o displayName para exibição
+        if access_level == 'none':
+            session['ad_user'] = user_object.distinguishedName.value
+            session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
+            session['user_groups'] = user_groups
+            session['access_level'] = access_level
+            session['sso_login'] = True
+            flash('Bem-vindo ao Catálogo de Endereços!', 'info')
+            return redirect(url_for('address_book'))
+
+        # Armazena o DN, nome de exibição, grupos e nível de acesso na sessão
         session['ad_user'] = user_object.distinguishedName.value
-        session['ad_password'] = None # Senha não é armazenada em SSO
         session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
         session['user_groups'] = user_groups
+        session['access_level'] = access_level
         session['sso_login'] = True
 
         flash('Login via SSO realizado com sucesso!', 'success')
