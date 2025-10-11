@@ -6,8 +6,12 @@
 <div class="page-header">
     <h1><i class="fas fa-user-circle me-2"></i>Detalhes de: {{ get_attr_value(user, 'displayName') or 'N/A' }}</h1>
     <div>
-        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
-        <a href="{{ url_for('manage_users') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar para a Busca</a>
+        {% if access_level != 'none' %}
+            <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
+            <a href="{{ url_for('manage_users') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar para a Busca</a>
+        {% else %}
+            <a href="{{ url_for('address_book') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Catálogo</a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

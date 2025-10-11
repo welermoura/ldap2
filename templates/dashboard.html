@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Monitoramento do Ambiente{% endblock %}
+{% block title %}Dashboard Operacional{% endblock %}
 
 {% block page_title %}
 <div class="page-header">
-    <h1><i class="fas fa-chart-line me-2"></i>Monitoramento do Ambiente</h1>
-    <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">
-        <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', 'Usuário') }})
-    </a>
+    <h1><i class="fas fa-chart-line me-2"></i>Dashboard Operacional</h1>
+    <div>
+        <a href="{{ url_for('address_book') }}" class="btn btn-info"><i class="fas fa-address-book me-2"></i>Catálogo de Endereços</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', 'Usuário') }})
+        </a>
+    </div>
 </div>
 {% endblock %}
 
