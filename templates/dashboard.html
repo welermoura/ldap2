@@ -38,6 +38,19 @@
         </div>
     </div>
     {% endif %}
+    {% if dashboard_data.scheduled_deactivations is not none %}
+    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="scheduled_deactivations" data-title="Desativações Agendadas (Próx. 7 Dias)">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Desativações (Próx. 7 dias)</div>
+                    <div class="fs-2 fw-bold text-primary">{{ dashboard_data.scheduled_deactivations.count }}</div>
+                </div>
+                <div class="fs-2 text-primary opacity-75"><i class="fas fa-calendar-times"></i></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     {% if dashboard_data.deactivated_last_7_days is not none %}
     <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="deactivated_last_7_days" data-title="Desativados (Últimos 7 Dias)">
         <div class="card glass-card h-100">
