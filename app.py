@@ -1326,6 +1326,50 @@ def edit_user(username):
         logging.error(f"Erro ao editar o usuário {username}: {e}", exc_info=True)
         return redirect(url_for('manage_users'))
 
+@app.route('/delete_user/<username>', methods=['POST'])
+@require_auth
+@require_permission(action='can_delete_user')
+def delete_user(username):
+    try:
+        conn = get_service_account_connection()
+        # Busca o usuário com os atributos necessários para a verificação
+        user_to_delete = get_user_by_samaccountname(conn, username, ['distinguishedName', 'title', 'company', 'l'])
+
+        if not user_to_delete:
+            flash("Usuário não encontrado para exclusão.", "error")
+            return redirect(url_for('manage_users'))
+
+        # Pega os dados do formulário de confirmação
+        confirm_title = request.form.get('confirm_title', '').strip()
+        confirm_company = request.form.get('confirm_company', '').strip()
+        confirm_location = request.form.get('confirm_location', '').strip()
+
+        # Pega os dados reais do AD
+        actual_title = get_attr_value(user_to_delete, 'title') or 'N/A'
+        actual_company = get_attr_value(user_to_delete, 'company') or 'N/A'
+        actual_location = get_attr_value(user_to_delete, 'l') or 'N/A'
+
+        # Compara os dados do formulário com os dados reais
+        if not (confirm_title == actual_title and confirm_company == actual_company and confirm_location == actual_location):
+            flash("As informações de confirmação não correspondem aos dados do usuário. A exclusão foi cancelada.", "error")
+            return redirect(url_for('view_user', username=username))
+
+        # Se a verificação passar, prossegue com a exclusão
+        user_dn = user_to_delete.distinguishedName.value
+        conn.delete(user_dn)
+
+        if conn.result['result'] == 0:
+            logging.info(f"Usuário '{username}' (DN: {user_dn}) foi permanentemente excluído por '{session.get('ad_user')}'. Verificação de segurança passou.")
+            flash(f"Usuário '{username}' foi excluído com sucesso!", "success")
+            return redirect(url_for('manage_users'))
+        else:
+            raise Exception(f"Falha ao excluir usuário do AD: {conn.result['description']} - {conn.result['message']}")
+
+    except Exception as e:
+        flash(f"Ocorreu um erro crítico ao tentar excluir o usuário: {e}", "error")
+        logging.error(f"Erro ao excluir o usuário '{username}': {e}", exc_info=True)
+        return redirect(request.referrer or url_for('manage_users'))
+
 # ==============================================================================
 # Rotas Apenas para Admin
 # ==============================================================================
@@ -1517,6 +1561,7 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     # Atualizado para iterar sobre o dicionário de visualizações disponíveis
                     views = {
