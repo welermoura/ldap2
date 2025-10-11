@@ -61,6 +61,20 @@
                 </div>
             </div>
         </div>
+
+        {% if check_permission(action='can_delete_user') %}
+        <div class="card glass-card mt-4 border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Zona de Perigo</h5>
+            </div>
+            <div class="card-body text-center">
+                <p>Esta ação é irreversível e removerá o usuário permanentemente do Active Directory.</p>
+                <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteUserModal">
+                    <i class="fas fa-trash-alt me-2"></i>Excluir Usuário Permanentemente
+                </button>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <div class="col-lg-8">
@@ -250,4 +264,71 @@
     padding-bottom: 0.9rem;
 }
 </style>
+
+<!-- Modal de Exclusão -->
+<div class="modal fade" id="deleteUserModal" tabindex="-1" aria-labelledby="deleteUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="deleteUserModalLabel"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Exclusão Permanente</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Para confirmar a exclusão de <strong>{{ get_attr_value(user, 'displayName') }}</strong>, por favor, insira as informações abaixo exatamente como aparecem no relatório de desligamento.</p>
+
+        <form id="delete-user-form" action="{{ url_for('delete_user', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST">
+            {{ form.csrf_token }}
+            <div class="mb-3">
+                <label class="form-label">Cargo do Usuário (Cargo atual: <strong>{{ get_attr_value(user, 'title') or 'N/A' }}</strong>)</label>
+                <input type="text" class="form-control" id="confirm-title" name="confirm_title" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Empresa do Usuário (Empresa atual: <strong>{{ get_attr_value(user, 'company') or 'N/A' }}</strong>)</label>
+                <input type="text" class="form-control" id="confirm-company" name="confirm_company" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Localidade do Usuário (Localidade atual: <strong>{{ get_attr_value(user, 'l') or 'N/A' }}</strong>)</label>
+                <input type="text" class="form-control" id="confirm-location" name="confirm_location" required>
+            </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-danger" id="confirm-delete-btn" form="delete-user-form" disabled>Confirmar Exclusão</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const deleteModal = document.getElementById('deleteUserModal');
+    if (deleteModal) {
+        const confirmBtn = document.getElementById('confirm-delete-btn');
+        const titleInput = document.getElementById('confirm-title');
+        const companyInput = document.getElementById('confirm-company');
+        const locationInput = document.getElementById('confirm-location');
+
+        const originalTitle = "{{ get_attr_value(user, 'title') or 'N/A' }}".trim();
+        const originalCompany = "{{ get_attr_value(user, 'company') or 'N/A' }}".trim();
+        const originalLocation = "{{ get_attr_value(user, 'l') or 'N/A' }}".trim();
+
+        function validateConfirmation() {
+            const titleMatch = titleInput.value.trim() === originalTitle;
+            const companyMatch = companyInput.value.trim() === originalCompany;
+            const locationMatch = locationInput.value.trim() === originalLocation;
+
+            if (titleMatch && companyMatch && locationMatch) {
+                confirmBtn.disabled = false;
+            } else {
+                confirmBtn.disabled = true;
+            }
+        }
+
+        titleInput.addEventListener('input', validateConfirmation);
+        companyInput.addEventListener('input', validateConfirmation);
+        locationInput.addEventListener('input', validateConfirmation);
+    }
+});
+</script>
 {% endblock %}

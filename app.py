@@ -637,25 +637,135 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
+    dashboard_data = {
+        'user_stats': None,
+        'deactivated_last_7_days': None,
+        'pending_reactivations': None,
+        'expiring_passwords': None
+    }
+
     try:
         conn = get_read_connection()
-        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
-        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
-        locked_last_week = get_accounts_locked_in_last_week(conn)
-        pending_reactivations = get_pending_reactivations(days=7)
-        expiring_passwords = get_expiring_passwords(conn, days=15)
+
+        if check_permission(view='can_view_user_stats'):
+            stats = get_dashboard_stats(conn)
+            dashboard_data['user_stats'] = {
+                'active': stats.get('enabled_users', 0),
+                'disabled': stats.get('disabled_users', 0)
+            }
+
+        # Alterado: 'locked_accounts' agora é 'deactivated_last_7_days' e lê do log.
+        if check_permission(view='can_view_locked_accounts'):
+            dashboard_data['deactivated_last_7_days'] = get_deactivated_from_log(days=7)
+
+        if check_permission(view='can_view_pending_reactivations'):
+            dashboard_data['pending_reactivations'] = get_pending_reactivations(days=7)
+
+        if check_permission(view='can_view_expiring_passwords'):
+            # Alterado: período de expiração reduzido para 5 dias.
+            dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=5)
+
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
+        dashboard_data = {key: None for key in dashboard_data}
 
-    return render_template(
-        'dashboard.html',
-        active_users=active_users,
-        disabled_users=disabled_users,
-        locked_last_week=locked_last_week,
-        pending_reactivations=pending_reactivations,
-        expiring_passwords=expiring_passwords
-    )
+    return render_template('dashboard.html', dashboard_data=dashboard_data)
+
+def get_deactivated_from_log(days=7):
+    """Lê o log e retorna uma lista de usuários desativados recentemente."""
+    deactivated_users = []
+    seven_days_ago = datetime.now() - timedelta(days=days)
+    log_pattern = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por '.+?'.")
+
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                match = log_pattern.search(line)
+                if match:
+                    log_time_str, username = match.groups()
+                    log_time = datetime.strptime(log_time_str, '%Y-%m-%d %H:%M:%S,%f')
+                    if log_time >= seven_days_ago:
+                        deactivated_users.append({'sam': username, 'date': log_time.strftime('%d/%m/%Y %H:%M')})
+    except FileNotFoundError:
+        logging.warning("Arquivo de log não encontrado ao buscar usuários desativados.")
+
+    return {'count': len(deactivated_users), 'users': deactivated_users}
+
+@app.route('/api/dashboard_list/<category>')
+@require_auth
+def api_dashboard_list(category):
+    permission_map = {
+        'active_users': 'can_view_user_stats',
+        'disabled_users': 'can_view_user_stats',
+        'deactivated_last_7_days': 'can_view_locked_accounts',
+        'pending_reactivations': 'can_view_pending_reactivations'
+    }
+    required_permission = permission_map.get(category)
+    if not required_permission or not check_permission(view=required_permission):
+        return jsonify({'error': 'Permissão negada.'}), 403
+
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
+
+    try:
+        conn = get_read_connection()
+        all_items = []
+
+        if category in ['active_users', 'disabled_users']:
+            search_filter = '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))' if category == 'active_users' else '(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))'
+            entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=['cn', 'sAMAccountName', 'title', 'l'], paged_size=1000, generator=True)
+            all_items = [{'cn': get_attr_value(e, 'cn'), 'sam': get_attr_value(e, 'sAMAccountName'), 'title': get_attr_value(e, 'title'), 'location': get_attr_value(e, 'l')} for e in entry_generator if get_attr_value(e, 'sAMAccountName')]
+
+        elif category == 'deactivated_last_7_days':
+            log_users = get_deactivated_from_log(days=7)['users']
+            for user_log in log_users:
+                user_ad = get_user_by_samaccountname(conn, user_log['sam'], attributes=['cn', 'title', 'l'])
+                all_items.append({
+                    'cn': get_attr_value(user_ad, 'cn') if user_ad else user_log['sam'],
+                    'sam': user_log['sam'],
+                    'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
+                    'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
+                    'date': user_log['date']
+                })
+
+        elif category == 'pending_reactivations':
+            schedules = load_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
+            for username, date_str in schedules.items():
+                reactivation_date = date.fromisoformat(date_str)
+                if today <= reactivation_date < limit_date:
+                    user_ad = get_user_by_samaccountname(conn, username, attributes=['cn', 'title', 'l'])
+                    all_items.append({
+                        'cn': get_attr_value(user_ad, 'cn') if user_ad else username,
+                        'sam': username,
+                        'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
+                        'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
+                        'date': reactivation_date.strftime('%d/%m/%Y')
+                    })
+        else:
+            return jsonify({'error': 'Categoria inválida.'}), 400
+
+        sorted_items = sorted(all_items, key=lambda x: x.get('date', '') or x.get('cn', '').lower(), reverse=True)
+        total_items = len(sorted_items)
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_items = sorted_items[start:end]
+
+        return jsonify({
+            'items': paginated_items,
+            'total': total_items,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_items + per_page - 1) // per_page
+        })
+
+    except Exception as e:
+        logging.error(f"Erro na API de lista do dashboard para a categoria '{category}': {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
@@ -1216,6 +1326,50 @@ def edit_user(username):
         logging.error(f"Erro ao editar o usuário {username}: {e}", exc_info=True)
         return redirect(url_for('manage_users'))
 
+@app.route('/delete_user/<username>', methods=['POST'])
+@require_auth
+@require_permission(action='can_delete_user')
+def delete_user(username):
+    try:
+        conn = get_service_account_connection()
+        # Busca o usuário com os atributos necessários para a verificação
+        user_to_delete = get_user_by_samaccountname(conn, username, ['distinguishedName', 'title', 'company', 'l'])
+
+        if not user_to_delete:
+            flash("Usuário não encontrado para exclusão.", "error")
+            return redirect(url_for('manage_users'))
+
+        # Pega os dados do formulário de confirmação
+        confirm_title = request.form.get('confirm_title', '').strip()
+        confirm_company = request.form.get('confirm_company', '').strip()
+        confirm_location = request.form.get('confirm_location', '').strip()
+
+        # Pega os dados reais do AD
+        actual_title = get_attr_value(user_to_delete, 'title') or 'N/A'
+        actual_company = get_attr_value(user_to_delete, 'company') or 'N/A'
+        actual_location = get_attr_value(user_to_delete, 'l') or 'N/A'
+
+        # Compara os dados do formulário com os dados reais
+        if not (confirm_title == actual_title and confirm_company == actual_company and confirm_location == actual_location):
+            flash("As informações de confirmação não correspondem aos dados do usuário. A exclusão foi cancelada.", "error")
+            return redirect(url_for('view_user', username=username))
+
+        # Se a verificação passar, prossegue com a exclusão
+        user_dn = user_to_delete.distinguishedName.value
+        conn.delete(user_dn)
+
+        if conn.result['result'] == 0:
+            logging.info(f"Usuário '{username}' (DN: {user_dn}) foi permanentemente excluído por '{session.get('ad_user')}'. Verificação de segurança passou.")
+            flash(f"Usuário '{username}' foi excluído com sucesso!", "success")
+            return redirect(url_for('manage_users'))
+        else:
+            raise Exception(f"Falha ao excluir usuário do AD: {conn.result['description']} - {conn.result['message']}")
+
+    except Exception as e:
+        flash(f"Ocorreu um erro crítico ao tentar excluir o usuário: {e}", "error")
+        logging.error(f"Erro ao excluir o usuário '{username}': {e}", exc_info=True)
+        return redirect(request.referrer or url_for('manage_users'))
+
 # ==============================================================================
 # Rotas Apenas para Admin
 # ==============================================================================
@@ -1371,6 +1525,14 @@ def permissions():
         'pager': 'Pager', 'mobile': 'Celular', 'fax': 'Fax', 'title': 'Cargo',
         'department': 'Departamento', 'company': 'Empresa'
     }
+    available_views = {
+        'can_export_data': 'Exportar Dados AD',
+        'can_view_user_stats': 'Ver Card: Estatísticas de Usuários',
+        'can_view_locked_accounts': 'Ver Card: Contas Bloqueadas',
+        'can_view_pending_reactivations': 'Ver Card: Reativações Pendentes',
+        'can_view_expiring_passwords': 'Ver Card: Senhas Expirando'
+    }
+
 
     try:
         conn = get_service_account_connection()
@@ -1399,9 +1561,12 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
+                    # Atualizado para iterar sobre o dicionário de visualizações disponíveis
                     views = {
-                        'can_export_data': f'{group}_can_export_data' in request.form
+                        view_key: f'{group}_view_{view_key}' in request.form
+                        for view_key in available_views
                     }
                     fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
                     permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields, 'views': views}
@@ -1425,7 +1590,8 @@ def permissions():
             permissions_form=permissions_form,
             groups=groups,
             permissions=permissions_data,
-            available_fields=available_fields
+            available_fields=available_fields,
+            available_views=available_views # Passa as views para o template
         )
 
     except Exception as e:
