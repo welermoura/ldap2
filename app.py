@@ -639,14 +639,12 @@ def index():
 def dashboard():
     dashboard_data = {
         'user_stats': None,
-        'locked_accounts': None,
+        'deactivated_last_7_days': None,
         'pending_reactivations': None,
         'expiring_passwords': None
     }
 
     try:
-        # A conexão só é necessária se o usuário tiver permissão para ver pelo menos um card que precise dela.
-        # Simplificando, vamos pegar a conexão e usá-la conforme necessário.
         conn = get_read_connection()
 
         if check_permission(view='can_view_user_stats'):
@@ -656,22 +654,42 @@ def dashboard():
                 'disabled': stats.get('disabled_users', 0)
             }
 
+        # Alterado: 'locked_accounts' agora é 'deactivated_last_7_days' e lê do log.
         if check_permission(view='can_view_locked_accounts'):
-            dashboard_data['locked_accounts'] = get_accounts_locked_in_last_week(conn)
+            dashboard_data['deactivated_last_7_days'] = get_deactivated_from_log(days=7)
 
         if check_permission(view='can_view_pending_reactivations'):
-            # Esta função não precisa da conexão AD, pois lê do arquivo de agendamento local.
             dashboard_data['pending_reactivations'] = get_pending_reactivations(days=7)
 
         if check_permission(view='can_view_expiring_passwords'):
-            dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=15)
+            # Alterado: período de expiração reduzido para 5 dias.
+            dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=5)
 
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        # Zera os dados em caso de erro para não mostrar informações parciais.
         dashboard_data = {key: None for key in dashboard_data}
 
     return render_template('dashboard.html', dashboard_data=dashboard_data)
+
+def get_deactivated_from_log(days=7):
+    """Lê o log e retorna uma lista de usuários desativados recentemente."""
+    deactivated_users = []
+    seven_days_ago = datetime.now() - timedelta(days=days)
+    log_pattern = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por '.+?'.")
+
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                match = log_pattern.search(line)
+                if match:
+                    log_time_str, username = match.groups()
+                    log_time = datetime.strptime(log_time_str, '%Y-%m-%d %H:%M:%S,%f')
+                    if log_time >= seven_days_ago:
+                        deactivated_users.append({'sam': username, 'date': log_time.strftime('%d/%m/%Y %H:%M')})
+    except FileNotFoundError:
+        logging.warning("Arquivo de log não encontrado ao buscar usuários desativados.")
+
+    return {'count': len(deactivated_users), 'users': deactivated_users}
 
 @app.route('/api/dashboard_list/<category>')
 @require_auth
@@ -679,41 +697,70 @@ def api_dashboard_list(category):
     permission_map = {
         'active_users': 'can_view_user_stats',
         'disabled_users': 'can_view_user_stats',
-        'locked_users': 'can_view_locked_accounts'
+        'deactivated_last_7_days': 'can_view_locked_accounts',
+        'pending_reactivations': 'can_view_pending_reactivations'
     }
     required_permission = permission_map.get(category)
     if not required_permission or not check_permission(view=required_permission):
         return jsonify({'error': 'Permissão negada.'}), 403
 
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
+
     try:
         conn = get_read_connection()
-        config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
-        search_filter = ''
+        all_items = []
 
-        if category == 'active_users':
-            search_filter = '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))'
-        elif category == 'disabled_users':
-            search_filter = '(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))'
-        elif category == 'locked_users':
-            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-            epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
-            delta = seven_days_ago - epoch_start
-            filetime_timestamp = int(delta.total_seconds() * 10_000_000)
-            search_filter = f"(&(objectClass=user)(objectCategory=person)(lockoutTime>={filetime_timestamp}))"
+        if category in ['active_users', 'disabled_users']:
+            search_filter = '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))' if category == 'active_users' else '(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))'
+            entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=['cn', 'sAMAccountName', 'title', 'l'], paged_size=1000, generator=True)
+            all_items = [{'cn': get_attr_value(e, 'cn'), 'sam': get_attr_value(e, 'sAMAccountName'), 'title': get_attr_value(e, 'title'), 'location': get_attr_value(e, 'l')} for e in entry_generator if get_attr_value(e, 'sAMAccountName')]
+
+        elif category == 'deactivated_last_7_days':
+            log_users = get_deactivated_from_log(days=7)['users']
+            for user_log in log_users:
+                user_ad = get_user_by_samaccountname(conn, user_log['sam'], attributes=['cn', 'title', 'l'])
+                all_items.append({
+                    'cn': get_attr_value(user_ad, 'cn') if user_ad else user_log['sam'],
+                    'sam': user_log['sam'],
+                    'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
+                    'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
+                    'date': user_log['date']
+                })
+
+        elif category == 'pending_reactivations':
+            schedules = load_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
+            for username, date_str in schedules.items():
+                reactivation_date = date.fromisoformat(date_str)
+                if today <= reactivation_date < limit_date:
+                    user_ad = get_user_by_samaccountname(conn, username, attributes=['cn', 'title', 'l'])
+                    all_items.append({
+                        'cn': get_attr_value(user_ad, 'cn') if user_ad else username,
+                        'sam': username,
+                        'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
+                        'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
+                        'date': reactivation_date.strftime('%d/%m/%Y')
+                    })
         else:
             return jsonify({'error': 'Categoria inválida.'}), 400
 
-        entry_generator = conn.extend.standard.paged_search(
-            search_base=search_base,
-            search_filter=search_filter,
-            attributes=['cn', 'sAMAccountName'],
-            paged_size=1000,
-            generator=True
-        )
+        sorted_items = sorted(all_items, key=lambda x: x.get('date', '') or x.get('cn', '').lower(), reverse=True)
+        total_items = len(sorted_items)
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_items = sorted_items[start:end]
 
-        users = [{'cn': get_attr_value(entry, 'cn'), 'sam': get_attr_value(entry, 'sAMAccountName')} for entry in entry_generator if get_attr_value(entry, 'sAMAccountName')]
-        return jsonify(sorted(users, key=lambda x: x.get('cn', '').lower()))
+        return jsonify({
+            'items': paginated_items,
+            'total': total_items,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_items + per_page - 1) // per_page
+        })
 
     except Exception as e:
         logging.error(f"Erro na API de lista do dashboard para a categoria '{category}': {e}", exc_info=True)
