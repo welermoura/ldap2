@@ -44,6 +44,7 @@ def get_flask_secret_key():
 
 app.secret_key = get_flask_secret_key()
 SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
+DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json')
 PERMISSIONS_FILE = os.path.join(basedir, 'permissions.json')
 KEY_FILE = os.path.join(basedir, 'secret.key')
 CONFIG_FILE = os.path.join(basedir, 'config.json')
@@ -130,6 +131,17 @@ def load_schedules():
 
 def save_schedules(schedules):
     with open(SCHEDULE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(schedules, f, indent=4)
+
+def load_disable_schedules():
+    try:
+        with open(DISABLE_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_disable_schedules(schedules):
+    with open(DISABLE_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedules, f, indent=4)
 
 GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
@@ -641,6 +653,7 @@ def dashboard():
         'user_stats': None,
         'deactivated_last_7_days': None,
         'pending_reactivations': None,
+        'scheduled_deactivations': None,
         'expiring_passwords': None
     }
 
@@ -654,15 +667,16 @@ def dashboard():
                 'disabled': stats.get('disabled_users', 0)
             }
 
-        # Alterado: 'locked_accounts' agora é 'deactivated_last_7_days' e lê do log.
         if check_permission(view='can_view_locked_accounts'):
             dashboard_data['deactivated_last_7_days'] = get_deactivated_from_log(days=7)
 
         if check_permission(view='can_view_pending_reactivations'):
             dashboard_data['pending_reactivations'] = get_pending_reactivations(days=7)
 
+        if check_permission(view='can_view_scheduled_deactivations'):
+            dashboard_data['scheduled_deactivations'] = get_pending_deactivations(days=7)
+
         if check_permission(view='can_view_expiring_passwords'):
-            # Alterado: período de expiração reduzido para 5 dias.
             dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=5)
 
     except Exception as e:
@@ -698,7 +712,8 @@ def api_dashboard_list(category):
         'active_users': 'can_view_user_stats',
         'disabled_users': 'can_view_user_stats',
         'deactivated_last_7_days': 'can_view_locked_accounts',
-        'pending_reactivations': 'can_view_pending_reactivations'
+        'pending_reactivations': 'can_view_pending_reactivations',
+        'scheduled_deactivations': 'can_view_scheduled_deactivations'
     }
     required_permission = permission_map.get(category)
     if not required_permission or not check_permission(view=required_permission):
@@ -744,6 +759,22 @@ def api_dashboard_list(category):
                         'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
                         'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
                         'date': reactivation_date.strftime('%d/%m/%Y')
+                    })
+
+        elif category == 'scheduled_deactivations':
+            schedules = load_disable_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
+            for username, date_str in schedules.items():
+                deactivation_date = date.fromisoformat(date_str)
+                if today <= deactivation_date < limit_date:
+                    user_ad = get_user_by_samaccountname(conn, username, attributes=['cn', 'title', 'l'])
+                    all_items.append({
+                        'cn': get_attr_value(user_ad, 'cn') if user_ad else username,
+                        'sam': username,
+                        'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
+                        'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
+                        'date': deactivation_date.strftime('%d/%m/%Y')
                     })
         else:
             return jsonify({'error': 'Categoria inválida.'}), 400
@@ -1188,36 +1219,40 @@ def toggle_status(username):
         logging.error(f"Erro em toggle_status para {username}: {e}", exc_info=True)
     return redirect(url_for('view_user', username=username))
 
-@app.route('/disable_user_temp/<username>', methods=['POST'])
+@app.route('/schedule_absence/<username>', methods=['POST'])
 @require_auth
 @require_permission(action='can_disable')
-def disable_user_temp(username):
+def schedule_absence(username):
+    start_date_str = request.form.get('start_date')
+    end_date_str = request.form.get('end_date')
+
     try:
-        days = int(request.args.get('days'))
-        if days <= 0:
-            flash("O número de dias deve ser positivo.", "error")
+        start_date = date.fromisoformat(start_date_str)
+        end_date = date.fromisoformat(end_date_str)
+        today = date.today()
+
+        if start_date < today or end_date <= start_date:
+            flash("Datas inválidas. A data de início não pode ser no passado e a data de fim deve ser após a data de início.", "error")
             return redirect(url_for('view_user', username=username))
 
-        conn = get_service_account_connection()
-        user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
+        # Agendamento de desativação
+        disable_schedules = load_disable_schedules()
+        disable_schedules[username] = start_date.isoformat()
+        save_disable_schedules(disable_schedules)
+        logging.info(f"Desativação da conta '{username}' agendada para {start_date.isoformat()} por '{session.get('ad_user')}'.")
 
-        uac = user.userAccountControl.value
-        if not (uac & 2):
-            conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(uac + 2)])]})
+        # Agendamento de reativação
+        reactivate_schedules = load_schedules()
+        reactivate_schedules[username] = end_date.isoformat()
+        save_schedules(reactivate_schedules)
+        logging.info(f"Reativação da conta '{username}' agendada para {end_date.isoformat()} por '{session.get('ad_user')}'.")
 
-        schedules = load_schedules()
-        reactivation_date = (date.today() + timedelta(days=days)).isoformat()
-        schedules[username] = reactivation_date
-        save_schedules(schedules)
+        flash(f"Ausência do usuário '{username}' agendada com sucesso.", "success")
 
-        logging.info(f"Conta de '{username}' desativada por {days} dias por '{session.get('ad_user')}'. Reativação agendada para {reactivation_date}.")
-        flash(f"Conta do usuário desativada com sucesso. A reativação está agendada para {reactivation_date}.", "success")
-    except Exception as e:
-        flash(f"Erro ao desativar conta temporariamente: {e}", "error")
-        logging.error(f"Erro em disable_user_temp para {username}: {e}", exc_info=True)
+    except (ValueError, TypeError) as e:
+        flash("Formato de data inválido.", "error")
+        logging.error(f"Erro ao agendar ausência para '{username}': {e}", exc_info=True)
+
     return redirect(url_for('view_user', username=username))
 
 @app.route('/reset_password/<username>', methods=['POST'])
@@ -1528,8 +1563,9 @@ def permissions():
     available_views = {
         'can_export_data': 'Exportar Dados AD',
         'can_view_user_stats': 'Ver Card: Estatísticas de Usuários',
-        'can_view_locked_accounts': 'Ver Card: Contas Bloqueadas',
-        'can_view_pending_reactivations': 'Ver Card: Reativações Pendentes',
+        'can_view_locked_accounts': 'Ver Card: Desativados Recentes (Log)',
+        'can_view_pending_reactivations': 'Ver Card: Reativações Agendadas',
+        'can_view_scheduled_deactivations': 'Ver Card: Desativações Agendadas',
         'can_view_expiring_passwords': 'Ver Card: Senhas Expirando'
     }
 
@@ -1652,7 +1688,21 @@ def get_pending_reactivations(days=7):
                 count += 1
         except (ValueError, TypeError):
             continue
-    return count
+    return {'count': count}
+
+def get_pending_deactivations(days=7):
+    schedules = load_disable_schedules()
+    count = 0
+    today = date.today()
+    limit_date = today + timedelta(days=days)
+    for username, date_str in schedules.items():
+        try:
+            deactivation_date = date.fromisoformat(date_str)
+            if today <= deactivation_date < limit_date:
+                count += 1
+        except (ValueError, TypeError):
+            continue
+    return {'count': count}
 
 def get_expiring_passwords(conn, days=15):
     expiring_users = []
