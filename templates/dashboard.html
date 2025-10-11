@@ -13,7 +13,7 @@
 
 {% block content %}
 <!-- Linha dos Cards de Estatísticas -->
-<div class="row">
+<div class="row justify-content-center">
     {% if dashboard_data.user_stats is not none %}
     <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="active_users" data-title="Contas Ativas">
         <div class="card glass-card h-100">
@@ -94,7 +94,7 @@
     {% endif %}
 
     <!-- Painel de Ações Rápidas -->
-    <div class="col-lg-4 mb-4">
+    <div class="{% if dashboard_data.expiring_passwords is not none %}col-lg-4{% else %}col-lg-12{% endif %} mb-4">
         <div class="card glass-card h-100">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fas fa-rocket me-2"></i>Ações Rápidas</h5>
