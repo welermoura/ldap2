@@ -864,6 +864,7 @@ def api_dashboard_list(category):
         category_filters = {
             'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
             'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+            'locked_users': '(lockoutTime>=1)',
         }
 
         specific_filter = category_filters.get(category)
@@ -873,17 +874,29 @@ def api_dashboard_list(category):
         search_filter = f"(&{base_filter}{specific_filter})"
 
         attributes = ['cn', 'sAMAccountName', 'title', 'l']
-
-        # Paginação simples (pode ser melhorada no futuro)
         page = request.args.get('page', 1, type=int)
         per_page = 20
 
-        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=request.args.get('cookie'))
+        # O paged_cookie é enviado pelo frontend para buscar a próxima página, se houver
+        paged_cookie = request.args.get('cookie')
 
-        items = [{'cn': e.cn.value, 'sam': e.sAMAccountName.value, 'title': e.title.value, 'location': e.l.value} for e in conn.entries]
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
-        # Simplificado: não calcula total de páginas para evitar contagem total
-        cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+        # Acesso seguro aos atributos usando a função auxiliar
+        items = [
+            {
+                'cn': get_attr_value(e, 'cn'),
+                'sam': get_attr_value(e, 'sAMAccountName'),
+                'title': get_attr_value(e, 'title'),
+                'location': get_attr_value(e, 'l')
+            }
+            for e in conn.entries
+        ]
+
+        # Acesso seguro ao cookie de paginação
+        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+        cookie = paged_results_control.get('value', {}).get('cookie')
+
         return jsonify({
             'items': items,
             'cookie': cookie.decode('utf-8') if cookie else None

@@ -187,9 +187,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 const response = await fetch(`/api/dashboard_list/${category}`);
-                if (!response.ok) throw new Error('Falha ao carregar dados.');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Falha ao carregar dados.' }));
+                    throw new Error(errorData.error || 'Falha ao carregar dados.');
+                }
 
-                allModalData = await response.json();
+                // Corrigido: Extrai a lista 'items' da resposta JSON
+                const responseData = await response.json();
+                allModalData = responseData.items || []; // Garante que é um array
                 renderModalList(allModalData);
 
             } catch (error) {
