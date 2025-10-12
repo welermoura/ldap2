@@ -883,9 +883,10 @@ def api_dashboard_list(category):
         items = [{'cn': e.cn.value, 'sam': e.sAMAccountName.value, 'title': e.title.value, 'location': e.l.value} for e in conn.entries]
 
         # Simplificado: não calcula total de páginas para evitar contagem total
+        cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
         return jsonify({
             'items': items,
-            'cookie': conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+            'cookie': cookie.decode('utf-8') if cookie else None
         })
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
