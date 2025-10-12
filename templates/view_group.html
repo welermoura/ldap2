@@ -68,8 +68,8 @@
 </div>
 
 <!-- Formulários ocultos para ações que precisam de POST. Eles são acionados via JavaScript. -->
-<form id="remove-member-form" method="POST" style="display: none;">{{ form.csrf_token() }}</form>
-<form id="add-member-form" action="{{ url_for('add_member', group_name=group.cn.value) }}" method="POST" style="display: none;">
+<form id="remove-member-form" method="POST" style="display: none;"></form>
+<form id="add-member-form" method="POST" style="display: none;">
     {{ form.csrf_token() }}
     <input type="hidden" name="user_sam" id="user-sam-to-add-hidden">
 </form>

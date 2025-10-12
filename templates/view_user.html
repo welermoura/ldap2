@@ -6,12 +6,8 @@
 <div class="page-header">
     <h1><i class="fas fa-user-circle me-2"></i>Detalhes de: {{ get_attr_value(user, 'displayName') or 'N/A' }}</h1>
     <div>
-        {% if access_level != 'none' %}
-            <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
-            <a href="{{ url_for('manage_users') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar para a Busca</a>
-        {% else %}
-            <a href="{{ url_for('address_book') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Catálogo</a>
-        {% endif %}
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
+        <a href="{{ url_for('manage_users') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar para a Busca</a>
     </div>
 </div>
 {% endblock %}
@@ -44,7 +40,7 @@
                                 <button type="submit" class="btn btn-success w-100"><i class="fas fa-check-circle me-2"></i>Reativar Conta</button>
                             </form>
                         {% elif status == 'Ativo' %}
-                            <button class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#scheduleAbsenceModal"><i class="fas fa-calendar-alt me-2"></i>Agendar Ausência (Férias)</button>
+                            <button class="btn btn-warning w-100" onclick="prompt_disable_user()"><i class="fas fa-clock me-2"></i>Desativar por X Dias</button>
                             <form action="{{ url_for('toggle_status', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST" onsubmit="return confirm('Tem certeza que deseja desativar esta conta permanentemente?');">
                                 {{ form.csrf_token }}
                                 <button type="submit" class="btn btn-danger w-100"><i class="fas fa-ban me-2"></i>Desativar Permanente</button>
@@ -65,20 +61,6 @@
                 </div>
             </div>
         </div>
-
-        {% if check_permission(action='can_delete_user') %}
-        <div class="card glass-card mt-4 border-danger">
-            <div class="card-header bg-danger text-white">
-                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Zona de Perigo</h5>
-            </div>
-            <div class="card-body text-center">
-                <p>Esta ação é irreversível e removerá o usuário permanentemente do Active Directory.</p>
-                <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteUserModal">
-                    <i class="fas fa-trash-alt me-2"></i>Excluir Usuário Permanentemente
-                </button>
-            </div>
-        </div>
-        {% endif %}
     </div>
 
     <div class="col-lg-8">
@@ -147,6 +129,32 @@
 
 {% block scripts %}
 <script>
+    // Função segura para desativação temporária
+    function prompt_disable_user() {
+        let days = prompt("Por quantos dias a conta deve ser desativada?", "30");
+        if (days && !isNaN(days) && parseInt(days) > 0) {
+            let form = document.createElement('form');
+            form.method = 'POST';
+            // A URL é gerada com segurança pelo Jinja2 no servidor
+            form.action = "{{ url_for('disable_user_temp', username=get_attr_value(user, 'sAMAccountName')) }}?days=" + parseInt(days);
+
+            let csrf_token_input = document.createElement('input');
+            csrf_token_input.type = 'hidden';
+            csrf_token_input.name = 'csrf_token';
+            // Reutiliza um token CSRF existente na página para o novo formulário
+            let existing_token = document.querySelector('form [name=csrf_token]');
+            if (existing_token) {
+                csrf_token_input.value = existing_token.value;
+            }
+            form.appendChild(csrf_token_input);
+
+            document.body.appendChild(form);
+            form.submit();
+        } else if (days !== null) {
+            alert("Por favor, insira um número de dias válido.");
+        }
+    }
+
     // NOVO SCRIPT PARA A ABA "MEMBRO DE"
     document.addEventListener('DOMContentLoaded', function() {
         const memberOfTab = document.getElementById('memberof-tab');
@@ -242,103 +250,4 @@
     padding-bottom: 0.9rem;
 }
 </style>
-
-<!-- Modal de Exclusão -->
-<div class="modal fade" id="deleteUserModal" tabindex="-1" aria-labelledby="deleteUserModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header bg-danger text-white">
-        <h5 class="modal-title" id="deleteUserModalLabel"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Exclusão Permanente</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <p>Para confirmar a exclusão de <strong>{{ get_attr_value(user, 'displayName') }}</strong>, por favor, insira as informações abaixo exatamente como aparecem no relatório de desligamento.</p>
-
-        <form id="delete-user-form" action="{{ url_for('delete_user', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST">
-            {{ form.csrf_token }}
-            <div class="mb-3">
-                <label class="form-label">Cargo do Usuário (Cargo atual: <strong>{{ get_attr_value(user, 'title') or 'N/A' }}</strong>)</label>
-                <input type="text" class="form-control" id="confirm-title" name="confirm_title" required>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Empresa do Usuário (Empresa atual: <strong>{{ get_attr_value(user, 'company') or 'N/A' }}</strong>)</label>
-                <input type="text" class="form-control" id="confirm-company" name="confirm_company" required>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Localidade do Usuário (Localidade atual: <strong>{{ get_attr_value(user, 'l') or 'N/A' }}</strong>)</label>
-                <input type="text" class="form-control" id="confirm-location" name="confirm_location" required>
-            </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="submit" class="btn btn-danger" id="confirm-delete-btn" form="delete-user-form" disabled>Confirmar Exclusão</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const deleteModal = document.getElementById('deleteUserModal');
-    if (deleteModal) {
-        const confirmBtn = document.getElementById('confirm-delete-btn');
-        const titleInput = document.getElementById('confirm-title');
-        const companyInput = document.getElementById('confirm-company');
-        const locationInput = document.getElementById('confirm-location');
-
-        const originalTitle = "{{ get_attr_value(user, 'title') or 'N/A' }}".trim();
-        const originalCompany = "{{ get_attr_value(user, 'company') or 'N/A' }}".trim();
-        const originalLocation = "{{ get_attr_value(user, 'l') or 'N/A' }}".trim();
-
-        function validateConfirmation() {
-            const titleMatch = titleInput.value.trim() === originalTitle;
-            const companyMatch = companyInput.value.trim() === originalCompany;
-            const locationMatch = locationInput.value.trim() === originalLocation;
-
-            if (titleMatch && companyMatch && locationMatch) {
-                confirmBtn.disabled = false;
-            } else {
-                confirmBtn.disabled = true;
-            }
-        }
-
-        titleInput.addEventListener('input', validateConfirmation);
-        companyInput.addEventListener('input', validateConfirmation);
-        locationInput.addEventListener('input', validateConfirmation);
-    }
-});
-</script>
-
-<!-- Modal de Agendamento de Ausência -->
-<div class="modal fade" id="scheduleAbsenceModal" tabindex="-1" aria-labelledby="scheduleAbsenceModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="scheduleAbsenceModalLabel"><i class="fas fa-calendar-alt me-2"></i>Agendar Ausência (Férias)</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <form action="{{ url_for('schedule_absence', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST">
-          <div class="modal-body">
-                {{ form.csrf_token }}
-                <p>Selecione o período em que a conta do usuário deve permanecer desativada.</p>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <label for="start_date" class="form-label">Data de Início (Desativação)</label>
-                        <input type="date" class="form-control" id="start_date" name="start_date" required>
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label for="end_date" class="form-label">Data de Fim (Reativação)</label>
-                        <input type="date" class="form-control" id="end_date" name="end_date" required>
-                    </div>
-                </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Agendar</button>
-          </div>
-      </form>
-    </div>
-  </div>
-</div>
 {% endblock %}

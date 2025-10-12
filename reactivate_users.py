@@ -15,7 +15,7 @@ logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(logs_dir, exist_ok=True)
 
 # Configuração do Logging
-log_path = os.path.join(logs_dir, 'schedule_manager.log')
+log_path = os.path.join(logs_dir, 'reactivator.log')
 logging.basicConfig(
     filename=log_path,
     level=logging.INFO,
@@ -27,7 +27,6 @@ logging.basicConfig(
 CONFIG_FILE = os.path.join(basedir, 'config.json')
 KEY_FILE = os.path.join(basedir, 'secret.key')
 SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
-DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json')
 GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
 
 # ==============================================================================
@@ -104,44 +103,6 @@ def get_group_by_name(conn, group_name, search_base):
 # ==============================================================================
 # Lógica Principal do Script
 # ==============================================================================
-def process_user_deactivations(conn, search_base):
-    """Processa a desativação agendada de contas de usuário."""
-    logging.info("Iniciando verificação de desativações de usuários agendadas.")
-    try:
-        with open(DISABLE_SCHEDULE_FILE, 'r') as f:
-            schedules = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        logging.info("Nenhum arquivo de agendamento de desativação ('disable_schedules.json') encontrado ou está vazio. Pulando.")
-        return
-
-    today = date.today().isoformat()
-    schedules_to_keep = {}
-
-    for username, deactivation_date in schedules.items():
-        if deactivation_date <= today:
-            logging.info(f"Tentando desativar o usuário '{username}' agendado para {deactivation_date}.")
-            user = get_user_by_samaccountname(conn, username, search_base)
-            if user:
-                uac = user.userAccountControl.value
-                if not (uac & 2):  # Se a conta ainda estiver ativa
-                    new_uac = uac | 2  # Adiciona a flag de desativado
-                    conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(new_uac)])]})
-                    if conn.result['description'] == 'success':
-                        logging.info(f"Usuário '{username}' desativado com sucesso conforme agendamento. Agendamento removido.")
-                    else:
-                        logging.error(f"Falha ao desativar '{username}': {conn.result['message']}. Mantendo agendamento para próxima execução.")
-                        schedules_to_keep[username] = deactivation_date
-                else:
-                    logging.warning(f"Usuário '{username}' já estava desativado. Removendo agendamento de desativação.")
-            else:
-                logging.warning(f"Usuário '{username}' agendado para desativação não foi encontrado no AD. Removendo agendamento.")
-        else:
-            schedules_to_keep[username] = deactivation_date
-
-    with open(DISABLE_SCHEDULE_FILE, 'w') as f:
-        json.dump(schedules_to_keep, f, indent=4)
-    logging.info("Verificação de desativações de usuários concluída.")
-
 def process_user_reactivations(conn, search_base):
     """Processa a reativação de contas de usuário de forma robusta."""
     logging.info("Iniciando verificação de reativações de usuários.")
@@ -254,7 +215,6 @@ if __name__ == "__main__":
         exit(1)
 
     try:
-        process_user_deactivations(conn, search_base)
         process_user_reactivations(conn, search_base)
         process_group_membership_changes(conn, search_base)
     except Exception as e:
