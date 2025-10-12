@@ -18,7 +18,6 @@ import secrets
 import io
 import csv
 import base64
-
 # ==============================================================================
 # Configuração Base
 # ==============================================================================
@@ -671,26 +670,26 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    active_users, disabled_users, locked_last_week, expiring_passwords = 0, 0, 0, []
+    # Inicializa todas as variáveis com valores padrão
+    active_users, disabled_users, expiring_passwords = 0, 0, []
+    deactivated_last_week = get_deactivated_in_last_week(log_path)
+    pending_reactivations = get_pending_reactivations(days=7)
+
     try:
         conn = get_read_connection()
         stats = get_dashboard_stats(conn)
         active_users = stats.get('enabled_users', 0)
         disabled_users = stats.get('disabled_users', 0)
-        locked_last_week = get_accounts_locked_in_last_week(conn)
         expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
-        flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        # Os valores padrão já foram definidos acima
-
-    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
-    pending_reactivations = get_pending_reactivations(days=7)
+        flash(f"Erro ao carregar dados do Active Directory: {e}", "error")
+        # Os valores já estão definidos como padrão, então a página pode carregar
 
     return render_template(
         'dashboard.html',
         active_users=active_users,
         disabled_users=disabled_users,
-        locked_last_week=locked_last_week,
+        deactivated_last_week=deactivated_last_week,
         pending_reactivations=pending_reactivations,
         expiring_passwords=expiring_passwords
     )
@@ -860,6 +859,38 @@ def api_group_members(group_name):
 @app.route('/api/dashboard_list/<category>')
 @require_auth
 def api_dashboard_list(category):
+    # Lógica para categorias que não dependem de uma conexão AD em tempo real
+    if category == 'deactivated_last_week':
+        users = []
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if "foi desativada por" in line:
+                        date_match = re.search(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                        user_match = re.search(r"Conta '([^']*)'", line)
+                        if date_match and user_match:
+                            log_date = datetime.strptime(date_match.group(1), "%Y-%m-%d %H:%M:%S")
+                            if log_date >= seven_days_ago:
+                                users.append({'cn': user_match.group(1), 'sam': user_match.group(1), 'title': '', 'location': ''})
+        except Exception as e:
+            logging.error(f"Erro ao processar log para a API de drill-down: {e}")
+        return jsonify({'items': users, 'cookie': None})
+
+    if category == 'pending_reactivations':
+        users = []
+        schedules = load_schedules()
+        today = date.today()
+        limit_date = today + timedelta(days=7)
+        for username, date_str in schedules.items():
+            try:
+                reactivation_date = date.fromisoformat(date_str)
+                if today <= reactivation_date < limit_date:
+                    users.append({'cn': username, 'sam': username, 'title': '', 'location': ''})
+            except (ValueError, TypeError):
+                continue
+        return jsonify({'items': users, 'cookie': None})
+
     try:
         conn = get_read_connection()
         config = load_config()
@@ -869,7 +900,6 @@ def api_dashboard_list(category):
         category_filters = {
             'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
             'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
-            'locked_users': '(lockoutTime>=1)',
         }
 
         specific_filter = category_filters.get(category)
@@ -882,13 +912,11 @@ def api_dashboard_list(category):
         page = request.args.get('page', 1, type=int)
         per_page = 20
 
-        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
         b64_cookie_str = request.args.get('cookie')
         paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
         conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
-        # Acesso seguro aos atributos usando a função auxiliar
         items = [
             {
                 'cn': get_attr_value(e, 'cn'),
@@ -899,17 +927,11 @@ def api_dashboard_list(category):
             for e in conn.entries
         ]
 
-        # Acesso seguro ao cookie de paginação (que é binário)
         paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
         cookie_bytes = paged_results_control.get('value', {}).get('cookie')
-
-        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
         next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
-        return jsonify({
-            'items': items,
-            'cookie': next_cookie_b64
-        })
+        return jsonify({'items': items, 'cookie': next_cookie_b64})
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
         logging.error(f"Erro de filtro LDAP para a categoria '{category}': {e}", exc_info=True)
@@ -1576,10 +1598,27 @@ def permissions():
 # ==============================================================================
 # Funções do Dashboard
 # ==============================================================================
+def get_deactivated_in_last_week(log_file_path):
+    """Conta o número de contas desativadas na última semana com base nos logs."""
+    count = 0
+    seven_days_ago = datetime.now() - timedelta(days=7)
+    try:
+        with open(log_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Exemplo de linha de log: 2023-10-26 10:30:00,123 - INFO - Conta 'username' foi desativada por 'admin'.
+                match = re.search(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                if match and "foi desativada por" in line:
+                    log_date = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                    if log_date >= seven_days_ago:
+                        count += 1
+    except FileNotFoundError:
+        logging.warning(f"Arquivo de log não encontrado em: {log_file_path}")
+    except Exception as e:
+        logging.error(f"Erro ao ler o arquivo de log para desativações: {e}")
+    return count
+
 def get_dashboard_stats(conn):
     stats = {'enabled_users': 0, 'disabled_users': 0}
-    if not conn:
-        return stats
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return stats
@@ -1601,8 +1640,6 @@ def get_dashboard_stats(conn):
     return stats
 
 def get_accounts_locked_in_last_week(conn):
-    if not conn:
-        return 0
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return 0
@@ -1634,8 +1671,6 @@ def get_pending_reactivations(days=7):
 
 def get_expiring_passwords(conn, days=15):
     expiring_users = []
-    if not conn:
-        return expiring_users
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
