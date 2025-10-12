@@ -5,10 +5,8 @@
 
 {% block page_title %}
     <div class="page-header">
-        <h1><i class="fas fa-user-plus me-2"></i>Criar Novo Usuário</h1>
-        {% if access_level != 'none' %}
-            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Painel</a>
-        {% endif %}
+        <h1>Criar Novo Usuário</h1>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Painel Principal</a>
     </div>
 {% endblock %}
 
