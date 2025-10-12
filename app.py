@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 import secrets
 import io
 import csv
-import base64
+
 # ==============================================================================
 # Configuração Base
 # ==============================================================================
@@ -670,26 +670,22 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    # Inicializa todas as variáveis com valores padrão
-    active_users, disabled_users, expiring_passwords = 0, 0, []
-    deactivated_last_week = get_deactivated_in_last_week(log_path)
-    pending_reactivations = get_pending_reactivations(days=7)
-
     try:
         conn = get_read_connection()
-        stats = get_dashboard_stats(conn)
-        active_users = stats.get('enabled_users', 0)
-        disabled_users = stats.get('disabled_users', 0)
-        expiring_passwords = get_expiring_passwords(conn, days=15)
+        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
+        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
+        locked_last_week = get_accounts_locked_in_last_week(conn)
+        pending_reactivations = get_pending_reactivations(days=7)
+        expiring_passwords = get_expiring_passwords(conn, days=5)
     except Exception as e:
-        flash(f"Erro ao carregar dados do Active Directory: {e}", "error")
-        # Os valores já estão definidos como padrão, então a página pode carregar
+        flash(f"Erro ao carregar dados do dashboard: {e}", "error")
+        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
 
     return render_template(
         'dashboard.html',
         active_users=active_users,
         disabled_users=disabled_users,
-        deactivated_last_week=deactivated_last_week,
+        locked_last_week=locked_last_week,
         pending_reactivations=pending_reactivations,
         expiring_passwords=expiring_passwords
     )
@@ -859,38 +855,6 @@ def api_group_members(group_name):
 @app.route('/api/dashboard_list/<category>')
 @require_auth
 def api_dashboard_list(category):
-    # Lógica para categorias que não dependem de uma conexão AD em tempo real
-    if category == 'deactivated_last_week':
-        users = []
-        seven_days_ago = datetime.now() - timedelta(days=7)
-        try:
-            with open(log_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if "foi desativada por" in line:
-                        date_match = re.search(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-                        user_match = re.search(r"Conta '([^']*)'", line)
-                        if date_match and user_match:
-                            log_date = datetime.strptime(date_match.group(1), "%Y-%m-%d %H:%M:%S")
-                            if log_date >= seven_days_ago:
-                                users.append({'cn': user_match.group(1), 'sam': user_match.group(1), 'title': '', 'location': ''})
-        except Exception as e:
-            logging.error(f"Erro ao processar log para a API de drill-down: {e}")
-        return jsonify({'items': users, 'cookie': None})
-
-    if category == 'pending_reactivations':
-        users = []
-        schedules = load_schedules()
-        today = date.today()
-        limit_date = today + timedelta(days=7)
-        for username, date_str in schedules.items():
-            try:
-                reactivation_date = date.fromisoformat(date_str)
-                if today <= reactivation_date < limit_date:
-                    users.append({'cn': username, 'sam': username, 'title': '', 'location': ''})
-            except (ValueError, TypeError):
-                continue
-        return jsonify({'items': users, 'cookie': None})
-
     try:
         conn = get_read_connection()
         config = load_config()
@@ -909,29 +873,21 @@ def api_dashboard_list(category):
         search_filter = f"(&{base_filter}{specific_filter})"
 
         attributes = ['cn', 'sAMAccountName', 'title', 'l']
+
+        # Paginação simples (pode ser melhorada no futuro)
         page = request.args.get('page', 1, type=int)
         per_page = 20
 
-        b64_cookie_str = request.args.get('cookie')
-        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=request.args.get('cookie'))
 
-        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
+        items = [{'cn': e.cn.value, 'sam': e.sAMAccountName.value, 'title': e.title.value, 'location': e.l.value} for e in conn.entries]
 
-        items = [
-            {
-                'cn': get_attr_value(e, 'cn'),
-                'sam': get_attr_value(e, 'sAMAccountName'),
-                'title': get_attr_value(e, 'title'),
-                'location': get_attr_value(e, 'l')
-            }
-            for e in conn.entries
-        ]
-
-        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
-        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
-
-        return jsonify({'items': items, 'cookie': next_cookie_b64})
+        # Simplificado: não calcula total de páginas para evitar contagem total
+        cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+        return jsonify({
+            'items': items,
+            'cookie': cookie.decode('utf-8') if cookie else None
+        })
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
         logging.error(f"Erro de filtro LDAP para a categoria '{category}': {e}", exc_info=True)
@@ -1598,25 +1554,6 @@ def permissions():
 # ==============================================================================
 # Funções do Dashboard
 # ==============================================================================
-def get_deactivated_in_last_week(log_file_path):
-    """Conta o número de contas desativadas na última semana com base nos logs."""
-    count = 0
-    seven_days_ago = datetime.now() - timedelta(days=7)
-    try:
-        with open(log_file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                # Exemplo de linha de log: 2023-10-26 10:30:00,123 - INFO - Conta 'username' foi desativada por 'admin'.
-                match = re.search(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-                if match and "foi desativada por" in line:
-                    log_date = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
-                    if log_date >= seven_days_ago:
-                        count += 1
-    except FileNotFoundError:
-        logging.warning(f"Arquivo de log não encontrado em: {log_file_path}")
-    except Exception as e:
-        logging.error(f"Erro ao ler o arquivo de log para desativações: {e}")
-    return count
-
 def get_dashboard_stats(conn):
     stats = {'enabled_users': 0, 'disabled_users': 0}
     config = load_config()
