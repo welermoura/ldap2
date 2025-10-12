@@ -274,6 +274,7 @@ def inject_access_level():
 def address_book():
     try:
         conn = get_read_connection()
+        config = load_config()
 
         # Filtro para garantir que apenas usuários com dados essenciais apareçam no catálogo
         search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
@@ -1110,6 +1111,94 @@ def remove_member(group_name, user_sam):
     except Exception as e:
         flash(f"Erro ao remover usuário do grupo: {e}", "error")
         logging.error(f"Erro ao remover usuário '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
+
+    return redirect(url_for('view_group', group_name=group_name))
+
+@app.route('/add_member_temp/<group_name>', methods=['POST'])
+@require_auth
+@require_permission(action='can_manage_groups')
+def add_member_temp(group_name):
+    try:
+        days = int(request.args.get('days'))
+        user_sam = request.form.get('user_sam')
+
+        if days <= 0 or not user_sam:
+            flash("Informações inválidas para adição temporária.", 'error')
+            return redirect(url_for('view_group', group_name=group_name))
+
+        conn = get_service_account_connection()
+        user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+
+        if user_to_add and group_to_modify:
+            # Adiciona o usuário imediatamente
+            conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
+            if conn.result['description'] == 'success':
+                # Agenda a remoção
+                schedules = load_group_schedules()
+                revert_date = (date.today() + timedelta(days=days)).isoformat()
+                schedule_entry = {
+                    'user_sam': user_sam,
+                    'group_name': group_name,
+                    'revert_action': 'remove',
+                    'revert_date': revert_date
+                }
+                schedules.append(schedule_entry)
+                save_group_schedules(schedules)
+
+                flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por {days} dias.", 'success')
+                logging.info(f"Usuário '{user_sam}' adicionado temporariamente ao grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
+            else:
+                flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
+        else:
+            flash("Usuário ou grupo não encontrado.", 'error')
+
+    except Exception as e:
+        flash(f"Erro na adição temporária: {e}", 'error')
+        logging.error(f"Erro ao adicionar temporariamente o usuário '{request.form.get('user_sam')}' ao grupo '{group_name}': {e}", exc_info=True)
+
+    return redirect(url_for('view_group', group_name=group_name))
+
+@app.route('/remove_member_temp/<group_name>/<user_sam>', methods=['POST'])
+@require_auth
+@require_permission(action='can_manage_groups')
+def remove_member_temp(group_name, user_sam):
+    try:
+        days = int(request.args.get('days'))
+        if days <= 0:
+            flash("O número de dias deve ser positivo.", 'error')
+            return redirect(url_for('view_group', group_name=group_name))
+
+        conn = get_service_account_connection()
+        user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
+        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
+
+        if user_to_remove and group_to_modify:
+            # Remove o usuário imediatamente
+            conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
+            if conn.result['description'] == 'success':
+                # Agenda a adição de volta
+                schedules = load_group_schedules()
+                revert_date = (date.today() + timedelta(days=days)).isoformat()
+                schedule_entry = {
+                    'user_sam': user_sam,
+                    'group_name': group_name,
+                    'revert_action': 'add',
+                    'revert_date': revert_date
+                }
+                schedules.append(schedule_entry)
+                save_group_schedules(schedules)
+
+                flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' por {days} dias.", 'success')
+                logging.info(f"Usuário '{user_sam}' removido temporariamente do grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
+            else:
+                 flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
+        else:
+            flash("Usuário ou grupo não encontrado.", 'error')
+
+    except Exception as e:
+        flash(f"Erro na remoção temporária: {e}", 'error')
+        logging.error(f"Erro ao remover temporariamente o usuário '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
 
     return redirect(url_for('view_group', group_name=group_name))
 
