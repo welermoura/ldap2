@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 import secrets
 import io
 import csv
+import base64
 
 # ==============================================================================
 # Configuração Base
@@ -881,8 +882,9 @@ def api_dashboard_list(category):
         page = request.args.get('page', 1, type=int)
         per_page = 20
 
-        # O paged_cookie é enviado pelo frontend para buscar a próxima página, se houver
-        paged_cookie = request.args.get('cookie')
+        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
+        b64_cookie_str = request.args.get('cookie')
+        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
         conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
@@ -897,13 +899,16 @@ def api_dashboard_list(category):
             for e in conn.entries
         ]
 
-        # Acesso seguro ao cookie de paginação
+        # Acesso seguro ao cookie de paginação (que é binário)
         paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-        cookie = paged_results_control.get('value', {}).get('cookie')
+        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
+
+        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
+        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
         return jsonify({
             'items': items,
-            'cookie': cookie.decode('utf-8') if cookie else None
+            'cookie': next_cookie_b64
         })
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
