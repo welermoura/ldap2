@@ -1068,7 +1068,7 @@ def view_user(username):
             expiry_time_ft = user['msDS-UserPasswordExpiryTimeComputed'].value
             expiry_datetime = filetime_to_datetime(expiry_time_ft)
             if expiry_datetime:
-                delta = expiry_datetime - datetime.utcnow()
+                delta = expiry_datetime - datetime.now(timezone.utc)
                 if delta.days >= 0:
                     password_expiry_info = f"Expira em {delta.days} dia(s) (em {expiry_datetime.strftime('%d/%m/%Y')})"
                 else:
