@@ -187,7 +187,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const list = document.createElement('ul');
             list.className = 'pagination';
 
-            // Prev button
             const prevLi = document.createElement('li');
             prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
             const prevA = document.createElement('a');
@@ -198,7 +197,6 @@ document.addEventListener('DOMContentLoaded', function() {
             prevLi.appendChild(prevA);
             list.appendChild(prevLi);
 
-            // Page numbers (simplified)
             const pageLi = document.createElement('li');
             pageLi.className = 'page-item disabled';
             const pageA = document.createElement('a');
@@ -207,7 +205,6 @@ document.addEventListener('DOMContentLoaded', function() {
             pageLi.appendChild(pageA);
             list.appendChild(pageLi);
 
-            // Next button
             const nextLi = document.createElement('li');
             nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
             const nextA = document.createElement('a');
@@ -272,14 +269,14 @@ document.addEventListener('DOMContentLoaded', function() {
         modalSearchInput.addEventListener('input', () => {
              const query = modalSearchInput.value.toLowerCase();
              if(query === '') {
-                 fetchData(currentCategory, 1); // Recarrega a primeira página
+                 fetchData(currentCategory, 1);
                  return;
              }
              const filteredData = originalData.filter(item =>
                 (item.cn && item.cn.toLowerCase().includes(query)) ||
                 (item.sam && item.sam.toLowerCase().includes(query))
              );
-             renderModalList(filteredData, 1, ()=>{}); // Mostra resultado filtrado sem paginação
+             renderModalList(filteredData, 1, ()=>{});
         });
 
         dataModal.addEventListener('show.bs.modal', function (event) {

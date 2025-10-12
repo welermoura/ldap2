@@ -44,7 +44,6 @@ def get_flask_secret_key():
 
 app.secret_key = get_flask_secret_key()
 SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
-DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json')
 PERMISSIONS_FILE = os.path.join(basedir, 'permissions.json')
 KEY_FILE = os.path.join(basedir, 'secret.key')
 CONFIG_FILE = os.path.join(basedir, 'config.json')
@@ -133,17 +132,6 @@ def save_schedules(schedules):
     with open(SCHEDULE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedules, f, indent=4)
 
-def load_disable_schedules():
-    try:
-        with open(DISABLE_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def save_disable_schedules(schedules):
-    with open(DISABLE_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(schedules, f, indent=4)
-
 GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
 
 def load_group_schedules():
@@ -194,14 +182,20 @@ def get_user_access_level(user_groups):
     return 'none'
 
 def check_permission(action=None, field=None, view=None):
+    access_level = session.get('access_level')
+    if access_level == 'full':
+        return True
+    if access_level == 'none':
+        return False
+
+    # Se for 'custom', verifica as permissões detalhadas
     user_groups = session.get('user_groups', [])
     permissions = load_permissions()
     if not permissions or not user_groups: return False
+
     for group in user_groups:
         rule = permissions.get(group)
-        if not rule: continue
-        if rule.get('type') == 'full': return True
-        if rule.get('type') == 'custom':
+        if rule and rule.get('type') == 'custom':
             if action and rule.get('actions', {}).get(action): return True
             if field and field in rule.get('fields', []): return True
             if view and rule.get('views', {}).get(view): return True
@@ -275,14 +269,16 @@ def address_book():
     try:
         conn = get_read_connection()
         config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+        if not search_base:
+            flash("Base de busca do AD não configurada.", "error")
+            return render_template('catalogo.html', users=[])
 
-        # Filtro para garantir que apenas usuários com dados essenciais apareçam no catálogo
         search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
-
         attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
 
         entry_generator = conn.extend.standard.paged_search(
-            search_base=config.get('AD_SEARCH_BASE'),
+            search_base=search_base,
             search_filter=search_filter,
             attributes=attributes_to_fetch,
             paged_size=1000,
@@ -290,7 +286,6 @@ def address_book():
         )
 
         users = [entry.entry_attributes_as_dict for entry in entry_generator]
-        # Ordena os usuários pelo nome de exibição
         sorted_users = sorted(users, key=lambda u: u.get('displayName', [''])[0].lower())
 
     except Exception as e:
@@ -408,8 +403,7 @@ def get_ldap_connection(user, password):
     if not ad_server:
         raise Exception("Servidor AD não configurado.")
     server = Server(ad_server, use_ssl=use_ldaps, get_info=ALL)
-    # Habilita o auto_referrals para seguir os redirecionamentos do AD em buscas complexas.
-    return Connection(server, user=user, password=password, auto_bind=True, auto_referrals=True)
+    return Connection(server, user=user, password=password, auto_bind=True)
 
 def get_service_account_connection():
     config = load_config()
@@ -602,22 +596,17 @@ def login():
 
             access_level = get_user_access_level(user_groups)
 
-            if access_level == 'none':
-                # Permite login, mas redireciona para o catálogo
-                session['ad_user'] = user_object.entry_dn
-                session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
-                session['user_groups'] = user_groups
-                session['access_level'] = access_level
-                session['sso_login'] = False
-                flash('Bem-vindo ao Catálogo de Endereços!', 'info')
-                return redirect(url_for('address_book'))
-
-            # Armazena o DN, nome de exibição, grupos e nível de acesso na sessão
+            # Armazena tudo na sessão primeiro
             session['ad_user'] = user_object.entry_dn
             session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
             session['user_groups'] = user_groups
             session['access_level'] = access_level
             session['sso_login'] = False
+
+            if access_level == 'none':
+                flash('Bem-vindo ao Catálogo de Endereços!', 'info')
+                return redirect(url_for('address_book'))
+
             flash('Login realizado com sucesso!', 'success')
             return redirect(url_for('dashboard'))
         except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
@@ -660,21 +649,15 @@ def sso_login():
 
         access_level = get_user_access_level(user_groups)
 
-        if access_level == 'none':
-            session['ad_user'] = user_object.distinguishedName.value
-            session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
-            session['user_groups'] = user_groups
-            session['access_level'] = access_level
-            session['sso_login'] = True
-            flash('Bem-vindo ao Catálogo de Endereços!', 'info')
-            return redirect(url_for('address_book'))
-
-        # Armazena o DN, nome de exibição, grupos e nível de acesso na sessão
         session['ad_user'] = user_object.distinguishedName.value
         session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
         session['user_groups'] = user_groups
         session['access_level'] = access_level
         session['sso_login'] = True
+
+        if access_level == 'none':
+            flash('Bem-vindo ao Catálogo de Endereços!', 'info')
+            return redirect(url_for('address_book'))
 
         flash('Login via SSO realizado com sucesso!', 'success')
         logging.info(f"Usuário '{username}' logado com sucesso via SSO.")
@@ -699,154 +682,25 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    dashboard_data = {
-        'user_stats': None,
-        'deactivated_last_7_days': None,
-        'pending_reactivations': None,
-        'scheduled_deactivations': None,
-        'expiring_passwords': None
-    }
-
     try:
         conn = get_read_connection()
-
-        if check_permission(view='can_view_user_stats'):
-            stats = get_dashboard_stats(conn)
-            dashboard_data['user_stats'] = {
-                'active': stats.get('enabled_users', 0),
-                'disabled': stats.get('disabled_users', 0)
-            }
-
-        if check_permission(view='can_view_locked_accounts'):
-            dashboard_data['deactivated_last_7_days'] = get_deactivated_from_log(days=7)
-
-        if check_permission(view='can_view_pending_reactivations'):
-            dashboard_data['pending_reactivations'] = get_pending_reactivations(days=7)
-
-        if check_permission(view='can_view_scheduled_deactivations'):
-            dashboard_data['scheduled_deactivations'] = get_pending_deactivations(days=7)
-
-        if check_permission(view='can_view_expiring_passwords'):
-            dashboard_data['expiring_passwords'] = get_expiring_passwords(conn, days=5)
-
+        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
+        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
+        locked_last_week = get_accounts_locked_in_last_week(conn)
+        pending_reactivations = get_pending_reactivations(days=7)
+        expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        dashboard_data = {key: None for key in dashboard_data}
+        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
 
-    return render_template('dashboard.html', dashboard_data=dashboard_data)
-
-def get_deactivated_from_log(days=7):
-    """Lê o log e retorna uma lista de usuários desativados recentemente."""
-    deactivated_users = []
-    seven_days_ago = datetime.now() - timedelta(days=days)
-    log_pattern = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por '.+?'.")
-
-    try:
-        with open(log_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                match = log_pattern.search(line)
-                if match:
-                    log_time_str, username = match.groups()
-                    log_time = datetime.strptime(log_time_str, '%Y-%m-%d %H:%M:%S,%f')
-                    if log_time >= seven_days_ago:
-                        deactivated_users.append({'sam': username, 'date': log_time.strftime('%d/%m/%Y %H:%M')})
-    except FileNotFoundError:
-        logging.warning("Arquivo de log não encontrado ao buscar usuários desativados.")
-
-    return {'count': len(deactivated_users), 'users': deactivated_users}
-
-@app.route('/api/dashboard_list/<category>')
-@require_auth
-def api_dashboard_list(category):
-    permission_map = {
-        'active_users': 'can_view_user_stats',
-        'disabled_users': 'can_view_user_stats',
-        'deactivated_last_7_days': 'can_view_locked_accounts',
-        'pending_reactivations': 'can_view_pending_reactivations',
-        'scheduled_deactivations': 'can_view_scheduled_deactivations'
-    }
-    required_permission = permission_map.get(category)
-    if not required_permission or not check_permission(view=required_permission):
-        return jsonify({'error': 'Permissão negada.'}), 403
-
-    page = request.args.get('page', 1, type=int)
-    per_page = 10
-    config = load_config()
-    search_base = config.get('AD_SEARCH_BASE')
-
-    try:
-        conn = get_read_connection()
-        all_items = []
-
-        if category in ['active_users', 'disabled_users']:
-            search_filter = '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))' if category == 'active_users' else '(&(objectClass=user)(objectCategory=person)(userAccountControl:1.2.840.113556.1.4.803:=2))'
-            entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=['cn', 'sAMAccountName', 'title', 'l'], paged_size=1000, generator=True)
-            all_items = [{'cn': get_attr_value(e, 'cn'), 'sam': get_attr_value(e, 'sAMAccountName'), 'title': get_attr_value(e, 'title'), 'location': get_attr_value(e, 'l')} for e in entry_generator if get_attr_value(e, 'sAMAccountName')]
-
-        elif category == 'deactivated_last_7_days':
-            log_users = get_deactivated_from_log(days=7)['users']
-            for user_log in log_users:
-                user_ad = get_user_by_samaccountname(conn, user_log['sam'], attributes=['cn', 'title', 'l'])
-                all_items.append({
-                    'cn': get_attr_value(user_ad, 'cn') if user_ad else user_log['sam'],
-                    'sam': user_log['sam'],
-                    'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
-                    'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
-                    'date': user_log['date']
-                })
-
-        elif category == 'pending_reactivations':
-            schedules = load_schedules()
-            today = date.today()
-            limit_date = today + timedelta(days=7)
-            for username, date_str in schedules.items():
-                reactivation_date = date.fromisoformat(date_str)
-                if today <= reactivation_date < limit_date:
-                    user_ad = get_user_by_samaccountname(conn, username, attributes=['cn', 'title', 'l'])
-                    all_items.append({
-                        'cn': get_attr_value(user_ad, 'cn') if user_ad else username,
-                        'sam': username,
-                        'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
-                        'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
-                        'date': reactivation_date.strftime('%d/%m/%Y')
-                    })
-
-        elif category == 'scheduled_deactivations':
-            schedules = load_disable_schedules()
-            today = date.today()
-            limit_date = today + timedelta(days=7)
-            for username, date_str in schedules.items():
-                deactivation_date = date.fromisoformat(date_str)
-                if today <= deactivation_date < limit_date:
-                    user_ad = get_user_by_samaccountname(conn, username, attributes=['cn', 'title', 'l'])
-                    all_items.append({
-                        'cn': get_attr_value(user_ad, 'cn') if user_ad else username,
-                        'sam': username,
-                        'title': get_attr_value(user_ad, 'title') if user_ad else 'N/A',
-                        'location': get_attr_value(user_ad, 'l') if user_ad else 'N/A',
-                        'date': deactivation_date.strftime('%d/%m/%Y')
-                    })
-        else:
-            return jsonify({'error': 'Categoria inválida.'}), 400
-
-        sorted_items = sorted(all_items, key=lambda x: x.get('date', '') or x.get('cn', '').lower(), reverse=True)
-        total_items = len(sorted_items)
-        start = (page - 1) * per_page
-        end = start + per_page
-        paginated_items = sorted_items[start:end]
-
-        return jsonify({
-            'items': paginated_items,
-            'total': total_items,
-            'page': page,
-            'per_page': per_page,
-            'total_pages': (total_items + per_page - 1) // per_page
-        })
-
-    except Exception as e:
-        logging.error(f"Erro na API de lista do dashboard para a categoria '{category}': {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
+    return render_template(
+        'dashboard.html',
+        active_users=active_users,
+        disabled_users=disabled_users,
+        locked_last_week=locked_last_week,
+        pending_reactivations=pending_reactivations,
+        expiring_passwords=expiring_passwords
+    )
 
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
@@ -1202,94 +1056,6 @@ def remove_member_temp(group_name, user_sam):
 
     return redirect(url_for('view_group', group_name=group_name))
 
-@app.route('/add_member_temp/<group_name>', methods=['POST'])
-@require_auth
-@require_permission(action='can_manage_groups')
-def add_member_temp(group_name):
-    try:
-        days = int(request.args.get('days'))
-        user_sam = request.form.get('user_sam')
-
-        if days <= 0 or not user_sam:
-            flash("Informações inválidas para adição temporária.", 'error')
-            return redirect(url_for('view_group', group_name=group_name))
-
-        conn = get_service_account_connection()
-        user_to_add = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-
-        if user_to_add and group_to_modify:
-            # Adiciona o usuário imediatamente
-            conn.extend.microsoft.add_members_to_groups([user_to_add.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                # Agenda a remoção
-                schedules = load_group_schedules()
-                revert_date = (date.today() + timedelta(days=days)).isoformat()
-                schedule_entry = {
-                    'user_sam': user_sam,
-                    'group_name': group_name,
-                    'revert_action': 'remove',
-                    'revert_date': revert_date
-                }
-                schedules.append(schedule_entry)
-                save_group_schedules(schedules)
-
-                flash(f"Usuário '{user_sam}' adicionado ao grupo '{group_name}' por {days} dias.", 'success')
-                logging.info(f"Usuário '{user_sam}' adicionado temporariamente ao grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
-            else:
-                flash(f"Falha ao adicionar usuário: {conn.result['message']}", 'error')
-        else:
-            flash("Usuário ou grupo não encontrado.", 'error')
-
-    except Exception as e:
-        flash(f"Erro na adição temporária: {e}", 'error')
-        logging.error(f"Erro ao adicionar temporariamente o usuário '{request.form.get('user_sam')}' ao grupo '{group_name}': {e}", exc_info=True)
-
-    return redirect(url_for('view_group', group_name=group_name))
-
-@app.route('/remove_member_temp/<group_name>/<user_sam>', methods=['POST'])
-@require_auth
-@require_permission(action='can_manage_groups')
-def remove_member_temp(group_name, user_sam):
-    try:
-        days = int(request.args.get('days'))
-        if days <= 0:
-            flash("O número de dias deve ser positivo.", 'error')
-            return redirect(url_for('view_group', group_name=group_name))
-
-        conn = get_service_account_connection()
-        user_to_remove = get_user_by_samaccountname(conn, user_sam, ['distinguishedName'])
-        group_to_modify = get_group_by_name(conn, group_name, ['distinguishedName'])
-
-        if user_to_remove and group_to_modify:
-            # Remove o usuário imediatamente
-            conn.extend.microsoft.remove_members_from_groups([user_to_remove.distinguishedName.value], group_to_modify.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                # Agenda a adição de volta
-                schedules = load_group_schedules()
-                revert_date = (date.today() + timedelta(days=days)).isoformat()
-                schedule_entry = {
-                    'user_sam': user_sam,
-                    'group_name': group_name,
-                    'revert_action': 'add',
-                    'revert_date': revert_date
-                }
-                schedules.append(schedule_entry)
-                save_group_schedules(schedules)
-
-                flash(f"Usuário '{user_sam}' removido do grupo '{group_name}' por {days} dias.", 'success')
-                logging.info(f"Usuário '{user_sam}' removido temporariamente do grupo '{group_name}' por '{session.get('ad_user')}'. Reversão em {revert_date}.")
-            else:
-                 flash(f"Falha ao remover usuário: {conn.result['message']}", 'error')
-        else:
-            flash("Usuário ou grupo não encontrado.", 'error')
-
-    except Exception as e:
-        flash(f"Erro na remoção temporária: {e}", 'error')
-        logging.error(f"Erro ao remover temporariamente o usuário '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
-
-    return redirect(url_for('view_group', group_name=group_name))
-
 def filetime_to_datetime(ft):
     EPOCH_AS_FILETIME = 116444736000000000
     HUNDREDS_OF_NANOSECONDS = 10000000
@@ -1357,40 +1123,36 @@ def toggle_status(username):
         logging.error(f"Erro em toggle_status para {username}: {e}", exc_info=True)
     return redirect(url_for('view_user', username=username))
 
-@app.route('/schedule_absence/<username>', methods=['POST'])
+@app.route('/disable_user_temp/<username>', methods=['POST'])
 @require_auth
 @require_permission(action='can_disable')
-def schedule_absence(username):
-    start_date_str = request.form.get('start_date')
-    end_date_str = request.form.get('end_date')
-
+def disable_user_temp(username):
     try:
-        start_date = date.fromisoformat(start_date_str)
-        end_date = date.fromisoformat(end_date_str)
-        today = date.today()
-
-        if start_date < today or end_date <= start_date:
-            flash("Datas inválidas. A data de início não pode ser no passado e a data de fim deve ser após a data de início.", "error")
+        days = int(request.args.get('days'))
+        if days <= 0:
+            flash("O número de dias deve ser positivo.", "error")
             return redirect(url_for('view_user', username=username))
 
-        # Agendamento de desativação
-        disable_schedules = load_disable_schedules()
-        disable_schedules[username] = start_date.isoformat()
-        save_disable_schedules(disable_schedules)
-        logging.info(f"Desativação da conta '{username}' agendada para {start_date.isoformat()} por '{session.get('ad_user')}'.")
+        conn = get_service_account_connection()
+        user = get_user_by_samaccountname(conn, username, ['userAccountControl', 'distinguishedName'])
+        if not user:
+            flash("Usuário não encontrado.", "error")
+            return redirect(url_for('manage_users'))
 
-        # Agendamento de reativação
-        reactivate_schedules = load_schedules()
-        reactivate_schedules[username] = end_date.isoformat()
-        save_schedules(reactivate_schedules)
-        logging.info(f"Reativação da conta '{username}' agendada para {end_date.isoformat()} por '{session.get('ad_user')}'.")
+        uac = user.userAccountControl.value
+        if not (uac & 2):
+            conn.modify(user.distinguishedName.value, {'userAccountControl': [(ldap3.MODIFY_REPLACE, [str(uac + 2)])]})
 
-        flash(f"Ausência do usuário '{username}' agendada com sucesso.", "success")
+        schedules = load_schedules()
+        reactivation_date = (date.today() + timedelta(days=days)).isoformat()
+        schedules[username] = reactivation_date
+        save_schedules(schedules)
 
-    except (ValueError, TypeError) as e:
-        flash("Formato de data inválido.", "error")
-        logging.error(f"Erro ao agendar ausência para '{username}': {e}", exc_info=True)
-
+        logging.info(f"Conta de '{username}' desativada por {days} dias por '{session.get('ad_user')}'. Reativação agendada para {reactivation_date}.")
+        flash(f"Conta do usuário desativada com sucesso. A reativação está agendada para {reactivation_date}.", "success")
+    except Exception as e:
+        flash(f"Erro ao desativar conta temporariamente: {e}", "error")
+        logging.error(f"Erro em disable_user_temp para {username}: {e}", exc_info=True)
     return redirect(url_for('view_user', username=username))
 
 @app.route('/reset_password/<username>', methods=['POST'])
@@ -1498,50 +1260,6 @@ def edit_user(username):
         flash(f"Ocorreu um erro: {e}", "error")
         logging.error(f"Erro ao editar o usuário {username}: {e}", exc_info=True)
         return redirect(url_for('manage_users'))
-
-@app.route('/delete_user/<username>', methods=['POST'])
-@require_auth
-@require_permission(action='can_delete_user')
-def delete_user(username):
-    try:
-        conn = get_service_account_connection()
-        # Busca o usuário com os atributos necessários para a verificação
-        user_to_delete = get_user_by_samaccountname(conn, username, ['distinguishedName', 'title', 'company', 'l'])
-
-        if not user_to_delete:
-            flash("Usuário não encontrado para exclusão.", "error")
-            return redirect(url_for('manage_users'))
-
-        # Pega os dados do formulário de confirmação
-        confirm_title = request.form.get('confirm_title', '').strip()
-        confirm_company = request.form.get('confirm_company', '').strip()
-        confirm_location = request.form.get('confirm_location', '').strip()
-
-        # Pega os dados reais do AD
-        actual_title = get_attr_value(user_to_delete, 'title') or 'N/A'
-        actual_company = get_attr_value(user_to_delete, 'company') or 'N/A'
-        actual_location = get_attr_value(user_to_delete, 'l') or 'N/A'
-
-        # Compara os dados do formulário com os dados reais
-        if not (confirm_title == actual_title and confirm_company == actual_company and confirm_location == actual_location):
-            flash("As informações de confirmação não correspondem aos dados do usuário. A exclusão foi cancelada.", "error")
-            return redirect(url_for('view_user', username=username))
-
-        # Se a verificação passar, prossegue com a exclusão
-        user_dn = user_to_delete.distinguishedName.value
-        conn.delete(user_dn)
-
-        if conn.result['result'] == 0:
-            logging.info(f"Usuário '{username}' (DN: {user_dn}) foi permanentemente excluído por '{session.get('ad_user')}'. Verificação de segurança passou.")
-            flash(f"Usuário '{username}' foi excluído com sucesso!", "success")
-            return redirect(url_for('manage_users'))
-        else:
-            raise Exception(f"Falha ao excluir usuário do AD: {conn.result['description']} - {conn.result['message']}")
-
-    except Exception as e:
-        flash(f"Ocorreu um erro crítico ao tentar excluir o usuário: {e}", "error")
-        logging.error(f"Erro ao excluir o usuário '{username}': {e}", exc_info=True)
-        return redirect(request.referrer or url_for('manage_users'))
 
 # ==============================================================================
 # Rotas Apenas para Admin
@@ -1698,15 +1416,6 @@ def permissions():
         'pager': 'Pager', 'mobile': 'Celular', 'fax': 'Fax', 'title': 'Cargo',
         'department': 'Departamento', 'company': 'Empresa'
     }
-    available_views = {
-        'can_export_data': 'Exportar Dados AD',
-        'can_view_user_stats': 'Ver Card: Estatísticas de Usuários',
-        'can_view_locked_accounts': 'Ver Card: Desativados Recentes (Log)',
-        'can_view_pending_reactivations': 'Ver Card: Reativações Agendadas',
-        'can_view_scheduled_deactivations': 'Ver Card: Desativações Agendadas',
-        'can_view_expiring_passwords': 'Ver Card: Senhas Expirando'
-    }
-
 
     try:
         conn = get_service_account_connection()
@@ -1735,12 +1444,9 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
-                        'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
-                    # Atualizado para iterar sobre o dicionário de visualizações disponíveis
                     views = {
-                        view_key: f'{group}_view_{view_key}' in request.form
-                        for view_key in available_views
+                        'can_export_data': f'{group}_can_export_data' in request.form
                     }
                     fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
                     permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields, 'views': views}
@@ -1764,8 +1470,7 @@ def permissions():
             permissions_form=permissions_form,
             groups=groups,
             permissions=permissions_data,
-            available_fields=available_fields,
-            available_views=available_views # Passa as views para o template
+            available_fields=available_fields
         )
 
     except Exception as e:
@@ -1826,21 +1531,7 @@ def get_pending_reactivations(days=7):
                 count += 1
         except (ValueError, TypeError):
             continue
-    return {'count': count}
-
-def get_pending_deactivations(days=7):
-    schedules = load_disable_schedules()
-    count = 0
-    today = date.today()
-    limit_date = today + timedelta(days=days)
-    for username, date_str in schedules.items():
-        try:
-            deactivation_date = date.fromisoformat(date_str)
-            if today <= deactivation_date < limit_date:
-                count += 1
-        except (ValueError, TypeError):
-            continue
-    return {'count': count}
+    return count
 
 def get_expiring_passwords(conn, days=15):
     expiring_users = []
@@ -1877,86 +1568,66 @@ def export_ad_data():
         conn = get_service_account_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        if not search_base:
-            flash("Base de busca do AD não configurada.", "error")
-            return redirect(url_for('dashboard'))
 
-        # ✅ FILTRO CORRIGIDO: só exporta usuários reais com sAMAccountName definido
-        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
+        # Atributos que devem estar preenchidos, baseados na lista da solicitação.
+        # A busca no AD já filtrará por usuários que possuam todos estes campos.
+        required_attributes = [
+            'givenName', 'sn', 'initials', 'displayName', 'description',
+            'physicalDeliveryOfficeName', 'telephoneNumber', 'mail', 'wWWHomePage',
+            'streetAddress', 'postOfficeBox', 'l', 'st', 'postalCode',
+            'homePhone', 'pager', 'mobile', 'facsimileTelephoneNumber',
+            'title', 'department', 'company'
+        ]
 
-        header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+        # Constrói o filtro LDAP dinamicamente
+        filter_parts = [f'({attr}=*)' for attr in required_attributes]
+        search_filter = f"(&(objectClass=user)(objectCategory=person){''.join(filter_parts)})"
+
+        # Cabeçalho e atributos para as colunas do CSV (mantém o formato original do relatório)
+        csv_header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
+        attributes_to_fetch = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
-        output.write('\ufeff')  # BOM para Excel UTF-8
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-        writer.writerow(header)
+        writer.writerow(csv_header)
 
         entry_generator = conn.extend.standard.paged_search(
             search_base=search_base,
             search_filter=search_filter,
-            attributes=attributes,
-            paged_size=500,
-            generator=True
+            attributes=attributes_to_fetch, # Busca apenas os atributos que irão para o CSV
+            paged_size=500
         )
 
         for entry in entry_generator:
-            attrs = entry.get('attributes', {})
-            sam = attrs.get('sAMAccountName')
-            # ✅ Pula entradas sem login (não são usuários reais)
-            if not sam:
-                continue
-
-            # Função auxiliar para obter valor com fallback seguro
-            def safe_get(attr_name, default=''):
-                val = attrs.get(attr_name)
-                return str(val) if val is not None else default
-
-            # Status da conta
-            uac_val = attrs.get('userAccountControl')
-            try:
-                uac = int(uac_val) if uac_val else 0
-                status = "Desativado" if uac & 2 else "Ativo"
-            except (ValueError, TypeError):
-                status = "Desconhecido"
-
-            # Formatação de datas
-            def format_ad_date(ft_value):
-                if not ft_value:
-                    return "Nunca"
-                try:
-                    dt = filetime_to_datetime(ft_value)
-                    return dt.strftime('%d/%m/%Y %H:%M:%S') if dt else "Nunca"
-                except Exception:
-                    return "Data Inválida"
-
-            row = [
-                safe_get('displayName'),
-                sam,
-                safe_get('department'),
-                safe_get('title'),
-                safe_get('mail'),
-                safe_get('telephoneNumber'),
-                safe_get('mobile'),
-                safe_get('physicalDeliveryOfficeName'),
-                safe_get('description'),
-                status,
-                format_ad_date(attrs.get('whenCreated')),
-                format_ad_date(attrs.get('lastLogonTimestamp'))
-            ]
-
+            # O filtro LDAP já garantiu que apenas usuários "completos" são retornados.
+            # Basta formatar e escrever a linha no CSV.
+            row = []
+            for attr in attributes_to_fetch:
+                value = get_attr_value(entry, attr)
+                if attr == 'userAccountControl':
+                    try:
+                        uac = int(value)
+                        value = "Desativado" if uac & 2 else "Ativo"
+                    except (ValueError, TypeError):
+                        value = "Desconhecido"
+                elif attr in ['whenCreated', 'lastLogonTimestamp']:
+                    try:
+                        dt_obj = filetime_to_datetime(value)
+                        value = dt_obj.strftime('%d/%m/%Y %H:%M:%S') if dt_obj else 'Nunca'
+                    except (ValueError, TypeError):
+                        value = 'Data Inválida'
+                row.append(str(value) or '')
             writer.writerow(row)
 
         output.seek(0)
-        return Response(
-            output.getvalue(),
-            mimetype="text/csv; charset=utf-8-sig",
-            headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"}
-        )
-
+        return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=export_ad_data.csv"})
+    except ldap3.core.exceptions.LDAPFilterError as fe:
+        logging.error(f"Erro de filtro LDAP na exportação de dados: {fe}", exc_info=True)
+        flash(f"Ocorreu um erro com o filtro de busca no Active Directory. Detalhe: {fe}", "error")
+        return redirect(url_for('dashboard'))
     except Exception as e:
-        logging.error(f"Erro na exportação de dados: {e}", exc_info=True)
-        flash("Erro ao gerar exportação. Verifique os logs.", "error")
+        logging.error(f"Erro fatal na exportação de dados: {e}", exc_info=True)
+        flash("Ocorreu um erro crítico ao gerar o arquivo de exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
