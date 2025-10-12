@@ -45,6 +45,7 @@ def get_flask_secret_key():
 
 app.secret_key = get_flask_secret_key()
 SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
+DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json') # Novo arquivo
 PERMISSIONS_FILE = os.path.join(basedir, 'permissions.json')
 KEY_FILE = os.path.join(basedir, 'secret.key')
 CONFIG_FILE = os.path.join(basedir, 'config.json')
@@ -131,6 +132,17 @@ def load_schedules():
 
 def save_schedules(schedules):
     with open(SCHEDULE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(schedules, f, indent=4)
+
+def load_disable_schedules():
+    try:
+        with open(DISABLE_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_disable_schedules(schedules):
+    with open(DISABLE_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedules, f, indent=4)
 
 GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
@@ -1130,6 +1142,47 @@ def disable_user_temp(username):
         flash(f"Erro ao desativar conta temporariamente: {e}", "error")
         logging.error(f"Erro em disable_user_temp para {username}: {e}", exc_info=True)
     return redirect(url_for('view_user', username=username))
+
+@app.route('/schedule_absence/<username>', methods=['POST'])
+@require_auth
+@require_permission(action='can_disable')
+def schedule_absence(username):
+    deactivation_date_str = request.form.get('deactivation_date')
+    reactivation_date_str = request.form.get('reactivation_date')
+
+    if not deactivation_date_str or not reactivation_date_str:
+        flash("Ambas as datas de desativação e reativação são obrigatórias.", "error")
+        return redirect(url_for('view_user', username=username))
+
+    try:
+        deactivation_date = date.fromisoformat(deactivation_date_str)
+        reactivation_date = date.fromisoformat(reactivation_date_str)
+
+        if deactivation_date >= reactivation_date:
+            flash("A data de reativação deve ser posterior à data de desativação.", "error")
+            return redirect(url_for('view_user', username=username))
+
+        # Salva o agendamento de desativação
+        disable_schedules = load_disable_schedules()
+        disable_schedules[username] = deactivation_date.isoformat()
+        save_disable_schedules(disable_schedules)
+
+        # Salva o agendamento de reativação
+        reactivation_schedules = load_schedules()
+        reactivation_schedules[username] = reactivation_date.isoformat()
+        save_schedules(reactivation_schedules)
+
+        flash(f"Ausência para '{username}' agendada com sucesso.", "success")
+        logging.info(f"Ausência para '{username}' agendada por '{session.get('user_display_name')}'. Desativação em: {deactivation_date_str}, Reativação em: {reactivation_date_str}.")
+
+    except ValueError:
+        flash("Formato de data inválido.", "error")
+    except Exception as e:
+        flash(f"Ocorreu um erro ao agendar a ausência: {e}", "error")
+        logging.error(f"Erro em schedule_absence para {username}: {e}", exc_info=True)
+
+    return redirect(url_for('view_user', username=username))
+
 
 @app.route('/reset_password/<username>', methods=['POST'])
 @require_auth
