@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 import secrets
 import io
 import csv
+import base64
 
 # ==============================================================================
 # Configuração Base
@@ -670,16 +671,20 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
+    active_users, disabled_users, locked_last_week, expiring_passwords = 0, 0, 0, []
     try:
         conn = get_read_connection()
-        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
-        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
+        stats = get_dashboard_stats(conn)
+        active_users = stats.get('enabled_users', 0)
+        disabled_users = stats.get('disabled_users', 0)
         locked_last_week = get_accounts_locked_in_last_week(conn)
-        pending_reactivations = get_pending_reactivations(days=7)
-        expiring_passwords = get_expiring_passwords(conn, days=5)
+        expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
+        # Os valores padrão já foram definidos acima
+
+    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
+    pending_reactivations = get_pending_reactivations(days=7)
 
     return render_template(
         'dashboard.html',
@@ -864,6 +869,7 @@ def api_dashboard_list(category):
         category_filters = {
             'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
             'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+            'locked_users': '(lockoutTime>=1)',
         }
 
         specific_filter = category_filters.get(category)
@@ -873,20 +879,36 @@ def api_dashboard_list(category):
         search_filter = f"(&{base_filter}{specific_filter})"
 
         attributes = ['cn', 'sAMAccountName', 'title', 'l']
-
-        # Paginação simples (pode ser melhorada no futuro)
         page = request.args.get('page', 1, type=int)
         per_page = 20
 
-        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=request.args.get('cookie'))
+        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
+        b64_cookie_str = request.args.get('cookie')
+        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
-        items = [{'cn': e.cn.value, 'sam': e.sAMAccountName.value, 'title': e.title.value, 'location': e.l.value} for e in conn.entries]
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
-        # Simplificado: não calcula total de páginas para evitar contagem total
-        cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+        # Acesso seguro aos atributos usando a função auxiliar
+        items = [
+            {
+                'cn': get_attr_value(e, 'cn'),
+                'sam': get_attr_value(e, 'sAMAccountName'),
+                'title': get_attr_value(e, 'title'),
+                'location': get_attr_value(e, 'l')
+            }
+            for e in conn.entries
+        ]
+
+        # Acesso seguro ao cookie de paginação (que é binário)
+        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
+
+        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
+        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+
         return jsonify({
             'items': items,
-            'cookie': cookie.decode('utf-8') if cookie else None
+            'cookie': next_cookie_b64
         })
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
@@ -1556,6 +1578,8 @@ def permissions():
 # ==============================================================================
 def get_dashboard_stats(conn):
     stats = {'enabled_users': 0, 'disabled_users': 0}
+    if not conn:
+        return stats
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return stats
@@ -1577,6 +1601,8 @@ def get_dashboard_stats(conn):
     return stats
 
 def get_accounts_locked_in_last_week(conn):
+    if not conn:
+        return 0
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return 0
@@ -1608,6 +1634,8 @@ def get_pending_reactivations(days=7):
 
 def get_expiring_passwords(conn, days=15):
     expiring_users = []
+    if not conn:
+        return expiring_users
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
