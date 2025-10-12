@@ -670,16 +670,20 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
+    active_users, disabled_users, locked_last_week, expiring_passwords = 0, 0, 0, []
     try:
         conn = get_read_connection()
-        active_users = get_dashboard_stats(conn).get('enabled_users', 0)
-        disabled_users = get_dashboard_stats(conn).get('disabled_users', 0)
+        stats = get_dashboard_stats(conn)
+        active_users = stats.get('enabled_users', 0)
+        disabled_users = stats.get('disabled_users', 0)
         locked_last_week = get_accounts_locked_in_last_week(conn)
-        pending_reactivations = get_pending_reactivations(days=7)
         expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        active_users, disabled_users, locked_last_week, pending_reactivations, expiring_passwords = 0, 0, 0, 0, []
+        # Os valores padrão já foram definidos acima
+
+    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
+    pending_reactivations = get_pending_reactivations(days=7)
 
     return render_template(
         'dashboard.html',
@@ -1569,6 +1573,8 @@ def permissions():
 # ==============================================================================
 def get_dashboard_stats(conn):
     stats = {'enabled_users': 0, 'disabled_users': 0}
+    if not conn:
+        return stats
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return stats
@@ -1590,6 +1596,8 @@ def get_dashboard_stats(conn):
     return stats
 
 def get_accounts_locked_in_last_week(conn):
+    if not conn:
+        return 0
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return 0
@@ -1621,6 +1629,8 @@ def get_pending_reactivations(days=7):
 
 def get_expiring_passwords(conn, days=15):
     expiring_users = []
+    if not conn:
+        return expiring_users
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
