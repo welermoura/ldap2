@@ -852,6 +852,49 @@ def api_group_members(group_name):
         logging.error(f"Erro na API de membros do grupo '{group_name}': {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/dashboard_list/<category>')
+@require_auth
+def api_dashboard_list(category):
+    try:
+        conn = get_read_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+
+        base_filter = "(&(objectClass=user)(objectCategory=person))"
+        category_filters = {
+            'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
+            'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+        }
+
+        specific_filter = category_filters.get(category)
+        if not specific_filter:
+            return jsonify({'error': 'Categoria inválida'}), 404
+
+        search_filter = f"(&{base_filter}{specific_filter})"
+
+        attributes = ['cn', 'sAMAccountName', 'title', 'l']
+
+        # Paginação simples (pode ser melhorada no futuro)
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=request.args.get('cookie'))
+
+        items = [{'cn': e.cn.value, 'sam': e.sAMAccountName.value, 'title': e.title.value, 'location': e.l.value} for e in conn.entries]
+
+        # Simplificado: não calcula total de páginas para evitar contagem total
+        return jsonify({
+            'items': items,
+            'cookie': conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+        })
+
+    except ldap3.core.exceptions.LDAPInvalidFilterError as e:
+        logging.error(f"Erro de filtro LDAP para a categoria '{category}': {e}", exc_info=True)
+        return jsonify({'error': f"Filtro LDAP malformado para a categoria: {category}"}), 500
+    except Exception as e:
+        logging.error(f"Erro na API do dashboard para a categoria '{category}': {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao carregar dados.'}), 500
+
 @app.route('/api/search_users_for_group/<group_name>')
 @require_auth
 @require_api_permission(action='can_manage_groups')
