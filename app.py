@@ -864,47 +864,69 @@ def api_dashboard_list(category):
         conn = get_read_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-
-        base_filter = "(&(objectClass=user)(objectCategory=person))"
-        category_filters = {
-            'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
-            'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
-            'locked_users': '(lockoutTime>=1)',
-        }
-
-        specific_filter = category_filters.get(category)
-        if not specific_filter:
-            return jsonify({'error': 'Categoria inválida'}), 404
-
-        search_filter = f"(&{base_filter}{specific_filter})"
-
         attributes = ['cn', 'sAMAccountName', 'title', 'l']
-        page = request.args.get('page', 1, type=int)
-        per_page = 20
+        items = []
+        next_cookie_b64 = None
 
-        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
-        b64_cookie_str = request.args.get('cookie')
-        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+        if category == 'pending_reactivations':
+            schedules = load_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
 
-        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
+            for username, date_str in schedules.items():
+                try:
+                    reactivation_date = date.fromisoformat(date_str)
+                    if today <= reactivation_date < limit_date:
+                        user_entry = get_user_by_samaccountname(conn, username, attributes)
+                        if user_entry:
+                            items.append({
+                                'cn': get_attr_value(user_entry, 'cn'),
+                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
+                                'title': get_attr_value(user_entry, 'title'),
+                                'location': get_attr_value(user_entry, 'l')
+                            })
+                except (ValueError, TypeError):
+                    continue # Ignora entradas de agendamento malformadas
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
 
-        # Acesso seguro aos atributos usando a função auxiliar
-        items = [
-            {
-                'cn': get_attr_value(e, 'cn'),
-                'sam': get_attr_value(e, 'sAMAccountName'),
-                'title': get_attr_value(e, 'title'),
-                'location': get_attr_value(e, 'l')
+        else:
+            base_filter = "(&(objectClass=user)(objectCategory=person))"
+
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
+            delta = seven_days_ago - epoch_start
+            filetime_timestamp = int(delta.total_seconds() * 10_000_000)
+
+            category_filters = {
+                'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
+                'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+                'locked_users': f'(lockoutTime>={filetime_timestamp})',
             }
-            for e in conn.entries
-        ]
 
-        # Acesso seguro ao cookie de paginação (que é binário)
-        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
+            specific_filter = category_filters.get(category)
+            if not specific_filter:
+                return jsonify({'error': 'Categoria inválida'}), 404
 
-        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
-        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+            search_filter = f"(&{base_filter}{specific_filter})"
+            per_page = 20
+            b64_cookie_str = request.args.get('cookie')
+            paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+
+            conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
+
+            items = [
+                {
+                    'cn': get_attr_value(e, 'cn'),
+                    'sam': get_attr_value(e, 'sAMAccountName'),
+                    'title': get_attr_value(e, 'title'),
+                    'location': get_attr_value(e, 'l')
+                }
+                for e in conn.entries
+            ]
+
+            paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+            cookie_bytes = paged_results_control.get('value', {}).get('cookie')
+            next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
         return jsonify({
             'items': items,
