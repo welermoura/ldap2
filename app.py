@@ -678,7 +678,7 @@ def dashboard():
         active_users = stats.get('enabled_users', 0)
         disabled_users = stats.get('disabled_users', 0)
         locked_last_week = get_accounts_locked_in_last_week(conn)
-        expiring_passwords = get_expiring_passwords(conn, days=15)
+        expiring_passwords = get_expiring_passwords(conn, days=5)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
         # Os valores padrão já foram definidos acima
