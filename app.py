@@ -284,23 +284,7 @@ def validate_sam_account(form, field):
         raise ValidationError('O login pode conter apenas letras, números e os caracteres ".", "-" e "_".')
 
 def get_attr_value(user, attr):
-    """
-    Função auxiliar polimórfica para extrair um valor de atributo de forma segura,
-    seja de um objeto ldap3.Entry ou de um dicionário.
-    """
-    # Se 'user' for um dicionário (como os do /catalogo)
-    if isinstance(user, dict):
-        value = user.get(attr)
-        # Os valores dos atributos no dicionário podem ser listas
-        if isinstance(value, list) and value:
-            return value[0]
-        return value if value is not None else ''
-
-    # Se 'user' for um objeto ldap3.Entry (comportamento original)
-    if attr in user and hasattr(user[attr], 'value'):
-        return user[attr].value if user[attr].value is not None else ''
-
-    return ''
+    return user[attr].value if attr in user and user[attr].value is not None else ''
 
 def filetime_to_datetime(ft):
     EPOCH_AS_FILETIME = 116444736000000000
@@ -1939,44 +1923,6 @@ def export_ad_data():
         logging.error(f"Erro na exportação de dados: {e}", exc_info=True)
         flash("Erro ao gerar exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
-
-@app.route('/catalogo')
-@require_auth
-def address_book():
-    users = []
-    config = load_config()
-
-    # Verifica se a conta de serviço está configurada antes de tentar a conexão
-    if not config.get('SERVICE_ACCOUNT_USER') or not config.get('SERVICE_ACCOUNT_PASSWORD'):
-        flash("O Catálogo de Endereços requer uma conta de serviço configurada para funcionar. Por favor, contate o administrador.", "warning")
-        return render_template('catalogo.html', users=[])
-
-    try:
-        conn = get_read_connection()
-        search_base = config.get('AD_SEARCH_BASE')
-        # Busca inicial e simples, conforme solicitado, para refinar posteriormente.
-        search_filter = "(objectCategory=person)"
-        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
-
-        entry_generator = conn.extend.standard.paged_search(
-            search_base=search_base,
-            search_filter=search_filter,
-            attributes=attributes_to_fetch,
-            paged_size=1000,
-            generator=True
-        )
-
-        # Processa os resultados diretamente sem filtragem em Python, por enquanto.
-        users_from_ad = [entry.get('attributes', {}) for entry in entry_generator]
-
-        # Ordenar os resultados pelo nome de exibição
-        users = sorted(users_from_ad, key=lambda u: u.get('displayName', [''])[0].lower())
-
-    except Exception as e:
-        flash("Ocorreu um erro ao carregar o catálogo de endereços. Por favor, contate o administrador.", "error")
-        logging.error(f"Erro ao carregar o catálogo de endereços: {e}", exc_info=True)
-
-    return render_template('catalogo.html', users=users)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
