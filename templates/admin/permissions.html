@@ -80,17 +80,17 @@
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_disable" {% if actions.get('can_disable') %}checked{% endif %}><label class="form-check-label">Ativar/Desativar</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_reset_password" {% if actions.get('can_reset_password') %}checked{% endif %}><label class="form-check-label">Resetar Senha</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_manage_groups" {% if actions.get('can_manage_groups') %}checked{% endif %}><label class="form-check-label">Gerenciar Grupos</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_export_data" {% if permissions.get(group, {}).get('views', {}).get('can_export_data') %}checked{% endif %}><label class="form-check-label">Pode Exportar Dados</label></div>
                             </div>
                             <hr>
-                            <h6 class="mb-3">Visualização no Dashboard</h6>
+                            <h6 class="mb-3">Permissões de Visualização (Dashboard & Exportação)</h6>
                             <div class="row">
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_active" {% if actions.get('can_view_active') %}checked{% endif %}><label class="form-check-label">Ver Contas Ativas</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_disabled" {% if actions.get('can_view_disabled') %}checked{% endif %}><label class="form-check-label">Ver Contas Desativadas</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_locked_week" {% if actions.get('can_view_locked_week') %}checked{% endif %}><label class="form-check-label">Ver Bloqueados na Semana</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_reactivations" {% if actions.get('can_view_reactivations') %}checked{% endif %}><label class="form-check-label">Ver Próximas Reativações</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_expiring_pass" {% if actions.get('can_view_expiring_pass') %}checked{% endif %}><label class="form-check-label">Ver Senhas Expirando</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_export_data" {% if permissions.get(group, {}).get('views', {}).get('can_export_data') %}checked{% endif %}><label class="form-check-label">Pode Exportar Dados</label></div>
+                                {% set views = permissions.get(group, {}).get('views', {}) %}
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_user_stats" {% if views.get('can_view_user_stats') %}checked{% endif %}><label class="form-check-label">Card: Estatísticas de Usuários</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_deactivated_last_week" {% if views.get('can_view_deactivated_last_week') %}checked{% endif %}><label class="form-check-label">Card: Desativados (Última Semana)</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_pending_reactivations" {% if views.get('can_view_pending_reactivations') %}checked{% endif %}><label class="form-check-label">Card: Reativações Pendentes</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_pending_deactivations" {% if views.get('can_view_pending_deactivations') %}checked{% endif %}><label class="form-check-label">Card: Desativações Agendadas</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_expiring_passwords" {% if views.get('can_view_expiring_passwords') %}checked{% endif %}><label class="form-check-label">Card: Senhas Expirando</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_export_data" {% if views.get('can_export_data') %}checked{% endif %}><label class="form-check-label">Pode Exportar Dados</label></div>
                             </div>
                             <hr>
                             <h6 class="mb-3">Campos Editáveis</h6>
