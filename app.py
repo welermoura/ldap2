@@ -1928,9 +1928,16 @@ def export_ad_data():
 @require_auth
 def address_book():
     users = []
+    config = load_config()
+
+    # Verifica se a conta de serviço está configurada antes de tentar a conexão
+    if not config.get('SERVICE_ACCOUNT_USER') or not config.get('SERVICE_ACCOUNT_PASSWORD'):
+        flash("O Catálogo de Endereços requer uma conta de serviço configurada para funcionar. Por favor, contate o administrador.", "warning")
+        return render_template('catalogo.html', users=[])
+
     try:
         conn = get_read_connection()
-        search_base = load_config().get('AD_SEARCH_BASE')
+        search_base = config.get('AD_SEARCH_BASE')
         # Filtro para buscar apenas usuários que tenham todos os campos essenciais preenchidos
         search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
         attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
