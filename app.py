@@ -671,26 +671,25 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    active_users, disabled_users, locked_last_week, expiring_passwords = 0, 0, 0, []
+    active_users, disabled_users, expiring_passwords = 0, 0, []
     try:
         conn = get_read_connection()
         stats = get_dashboard_stats(conn)
         active_users = stats.get('enabled_users', 0)
         disabled_users = stats.get('disabled_users', 0)
-        locked_last_week = get_accounts_locked_in_last_week(conn)
         expiring_passwords = get_expiring_passwords(conn, days=5)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
-        # Os valores padrão já foram definidos acima
 
-    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
+    # Funções que não dependem de uma conexão AD
     pending_reactivations = get_pending_reactivations(days=7)
+    deactivated_last_week = get_deactivated_last_week()
 
     return render_template(
         'dashboard.html',
         active_users=active_users,
         disabled_users=disabled_users,
-        locked_last_week=locked_last_week,
+        deactivated_last_week=deactivated_last_week,
         pending_reactivations=pending_reactivations,
         expiring_passwords=expiring_passwords
     )
@@ -866,17 +865,41 @@ def api_dashboard_list(category):
         search_base = config.get('AD_SEARCH_BASE')
 
         base_filter = "(&(objectClass=user)(objectCategory=person))"
-        category_filters = {
-            'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
-            'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
-            'locked_users': '(lockoutTime>=1)',
-        }
+        if category == 'deactivated_last_week':
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            usernames = set() # Usar um set para evitar duplicatas
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - INFO - Conta '(.+?)' foi desativada", line)
+                        if match:
+                            log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S')
+                            if log_time >= seven_days_ago:
+                                usernames.add(match.group(2))
+            except (FileNotFoundError, Exception) as e:
+                logging.error(f"Erro ao processar log para API de desativados: {e}")
 
-        specific_filter = category_filters.get(category)
-        if not specific_filter:
-            return jsonify({'error': 'Categoria inválida'}), 404
-
-        search_filter = f"(&{base_filter}{specific_filter})"
+            for username in usernames:
+                user_entry = get_user_by_samaccountname(conn, username, attributes)
+                if user_entry:
+                    items.append({
+                        'cn': get_attr_value(user_entry, 'cn'),
+                        'sam': get_attr_value(user_entry, 'sAMAccountName'),
+                        'title': get_attr_value(user_entry, 'title'),
+                        'location': get_attr_value(user_entry, 'l'),
+                        'department': get_attr_value(user_entry, 'department'),
+                        'company': get_attr_value(user_entry, 'company')
+                    })
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+        else:
+            category_filters = {
+                'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
+                'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+            }
+            specific_filter = category_filters.get(category)
+            if not specific_filter:
+                return jsonify({'error': 'Categoria inválida'}), 404
+            search_filter = f"(&{base_filter}{specific_filter})"
 
         attributes = ['cn', 'sAMAccountName', 'title', 'l']
         page = request.args.get('page', 1, type=int)
@@ -1600,23 +1623,27 @@ def get_dashboard_stats(conn):
         logging.error(f"Erro ao buscar estatísticas do dashboard: {e}", exc_info=True)
     return stats
 
-def get_accounts_locked_in_last_week(conn):
-    if not conn:
-        return 0
-    config = load_config()
-    search_base = config.get('AD_SEARCH_BASE')
-    if not search_base: return 0
+def get_deactivated_last_week():
+    """Conta usuários desativados na última semana a partir do log."""
+    count = 0
+    seven_days_ago = datetime.now() - timedelta(days=7)
     try:
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-        epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
-        delta = seven_days_ago - epoch_start
-        filetime_timestamp = int(delta.total_seconds() * 10_000_000)
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(lockoutTime>={filetime_timestamp}))"
-        conn.search(search_base, search_filter, attributes=['cn'], paged_size=1000)
-        return len(conn.entries)
-    except Exception as e:
-        logging.error(f"Erro ao buscar contas bloqueadas na última semana: {e}", exc_info=True)
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Exemplo de log: 2023-10-27 10:30:00,123 - INFO - Conta 'someuser' foi desativada por 'admin'.
+                match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - INFO - Conta '(.+?)' foi desativada", line)
+                if match:
+                    log_time_str = match.group(1)
+                    log_time = datetime.strptime(log_time_str, '%Y-%m-%d %H:%M:%S')
+                    if log_time >= seven_days_ago:
+                        count += 1
+    except FileNotFoundError:
+        logging.warning("Arquivo de log não encontrado ao verificar desativações da última semana.")
         return 0
+    except Exception as e:
+        logging.error(f"Erro ao ler log para desativações da última semana: {e}", exc_info=True)
+        return 0
+    return count
 
 def get_pending_reactivations(days=7):
     schedules = load_schedules()
