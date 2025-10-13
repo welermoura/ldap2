@@ -63,6 +63,20 @@
                 </div>
             </div>
         </div>
+
+        {% if check_permission(action='can_delete_user') %}
+        <div class="card border-danger mt-4">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Zona de Perigo</h5>
+            </div>
+            <div class="card-body text-center">
+                <p>A exclusão de um usuário é uma ação irreversível e removerá permanentemente o objeto do Active Directory.</p>
+                <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#deleteUserModal">
+                    <i class="fas fa-trash-alt me-2"></i>Excluir Usuário
+                </button>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <div class="col-lg-8">
@@ -256,4 +270,59 @@
     padding-bottom: 0.9rem;
 }
 </style>
+
+<!-- Modal de Exclusão de Usuário -->
+{% if check_permission(action='can_delete_user') %}
+<div class="modal fade" id="deleteUserModal" tabindex="-1" aria-labelledby="deleteUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="deleteUserModalLabel"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Exclusão Permanente</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="deleteUserForm" action="{{ url_for('delete_user', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST">
+        {{ form.csrf_token }}
+        <div class="modal-body">
+          <p>Esta ação <strong>não pode ser desfeita</strong>. O usuário <strong>{{ get_attr_value(user, 'displayName') }}</strong> será removido permanentemente.</p>
+          <p>Para confirmar, por favor, digite o <strong>cargo</strong> e o <strong>login</strong> do usuário nos campos abaixo.</p>
+
+          <div class="mb-3">
+            <label for="confirm_title" class="form-label">Digite o Cargo: <strong class="text-highlight">{{ get_attr_value(user, 'title') or 'N/A' }}</strong></label>
+            <input type="text" class="form-control" id="confirm_title" name="confirm_title" required autocomplete="off">
+          </div>
+          <div class="mb-3">
+            <label for="confirm_sam" class="form-label">Digite o Login: <strong class="text-highlight">{{ get_attr_value(user, 'sAMAccountName') }}</strong></label>
+            <input type="text" class="form-control" id="confirm_sam" name="confirm_sam" required autocomplete="off">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" id="confirmDeleteBtn" class="btn btn-danger" disabled>Eu entendo as consequências, excluir este usuário</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const confirmTitleInput = document.getElementById('confirm_title');
+    const confirmSamInput = document.getElementById('confirm_sam');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+
+    const correctTitle = {{ (get_attr_value(user, 'title') or 'N/A')|tojson }};
+    const correctSam = {{ get_attr_value(user, 'sAMAccountName')|tojson }};
+
+    function validateInput() {
+        const titleMatch = confirmTitleInput.value === correctTitle;
+        const samMatch = confirmSamInput.value === correctSam;
+        confirmDeleteBtn.disabled = !(titleMatch && samMatch);
+    }
+
+    confirmTitleInput.addEventListener('input', validateInput);
+    confirmSamInput.addEventListener('input', validateInput);
+});
+</script>
+{% endif %}
+
 {% endblock %}
