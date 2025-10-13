@@ -681,9 +681,8 @@ def dashboard():
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
 
-    # Funções que não dependem de uma conexão AD
-    pending_reactivations = get_pending_reactivations(days=7)
     deactivated_last_week = get_deactivated_last_week()
+    pending_reactivations = get_pending_reactivations(days=7)
 
     return render_template(
         'dashboard.html',
@@ -863,17 +862,19 @@ def api_dashboard_list(category):
         conn = get_read_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
+        attributes = ['cn', 'sAMAccountName', 'title', 'l', 'department', 'company']
+        items = []
+        next_cookie_b64 = None
 
-        base_filter = "(&(objectClass=user)(objectCategory=person))"
         if category == 'deactivated_last_week':
             seven_days_ago = datetime.now() - timedelta(days=7)
-            usernames = set() # Usar um set para evitar duplicatas
+            usernames = set()
             try:
                 with open(log_path, 'r', encoding='utf-8') as f:
                     for line in f:
-                        match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - INFO - Conta '(.+?)' foi desativada", line)
+                        match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por", line)
                         if match:
-                            log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S')
+                            log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S,%f')
                             if log_time >= seven_days_ago:
                                 usernames.add(match.group(2))
             except (FileNotFoundError, Exception) as e:
@@ -892,6 +893,7 @@ def api_dashboard_list(category):
                     })
             items = sorted(items, key=lambda x: x.get('cn', '').lower())
         else:
+            base_filter = "(&(objectClass=user)(objectCategory=person))"
             category_filters = {
                 'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
                 'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
@@ -899,35 +901,29 @@ def api_dashboard_list(category):
             specific_filter = category_filters.get(category)
             if not specific_filter:
                 return jsonify({'error': 'Categoria inválida'}), 404
+
             search_filter = f"(&{base_filter}{specific_filter})"
+            per_page = 20
+            b64_cookie_str = request.args.get('cookie')
+            paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
-        attributes = ['cn', 'sAMAccountName', 'title', 'l']
-        page = request.args.get('page', 1, type=int)
-        per_page = 20
+            conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
-        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
-        b64_cookie_str = request.args.get('cookie')
-        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+            items = [
+                {
+                    'cn': get_attr_value(e, 'cn'),
+                    'sam': get_attr_value(e, 'sAMAccountName'),
+                    'title': get_attr_value(e, 'title'),
+                    'location': get_attr_value(e, 'l'),
+                    'department': get_attr_value(e, 'department'),
+                    'company': get_attr_value(e, 'company')
+                }
+                for e in conn.entries
+            ]
 
-        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
-
-        # Acesso seguro aos atributos usando a função auxiliar
-        items = [
-            {
-                'cn': get_attr_value(e, 'cn'),
-                'sam': get_attr_value(e, 'sAMAccountName'),
-                'title': get_attr_value(e, 'title'),
-                'location': get_attr_value(e, 'l')
-            }
-            for e in conn.entries
-        ]
-
-        # Acesso seguro ao cookie de paginação (que é binário)
-        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
-
-        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
-        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+            paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+            cookie_bytes = paged_results_control.get('value', {}).get('cookie')
+            next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
         return jsonify({
             'items': items,
@@ -1193,7 +1189,7 @@ def toggle_status(username):
                 save_schedules(schedules)
                 logging.info(f"Agendamento de reativação para '{username}' foi removido devido à reativação manual.")
 
-        logging.info(f"Conta '{username}' foi {action_message} por '{session.get('ad_user')}'.")
+        logging.info(f"Conta '{username}' foi {action_message} por '{session.get('user_display_name', session.get('ad_user'))}'.")
         flash(f"Conta do usuário foi {action_message} com sucesso.", "success")
     except Exception as e:
         flash(f"Erro ao alterar status da conta: {e}", "error")
@@ -1630,19 +1626,15 @@ def get_deactivated_last_week():
     try:
         with open(log_path, 'r', encoding='utf-8') as f:
             for line in f:
-                # Exemplo de log: 2023-10-27 10:30:00,123 - INFO - Conta 'someuser' foi desativada por 'admin'.
-                match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - INFO - Conta '(.+?)' foi desativada", line)
+                match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por", line)
                 if match:
-                    log_time_str = match.group(1)
-                    log_time = datetime.strptime(log_time_str, '%Y-%m-%d %H:%M:%S')
+                    log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S,%f')
                     if log_time >= seven_days_ago:
                         count += 1
     except FileNotFoundError:
         logging.warning("Arquivo de log não encontrado ao verificar desativações da última semana.")
-        return 0
     except Exception as e:
         logging.error(f"Erro ao ler log para desativações da última semana: {e}", exc_info=True)
-        return 0
     return count
 
 def get_pending_reactivations(days=7):
