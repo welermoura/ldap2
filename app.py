@@ -895,6 +895,30 @@ def api_dashboard_list(category):
                         'company': get_attr_value(user_entry, 'company')
                     })
             items = sorted(items, key=lambda x: x.get('cn', '').lower())
+
+        elif category == 'pending_reactivations':
+            schedules = load_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
+
+            for username, date_str in schedules.items():
+                try:
+                    reactivation_date = date.fromisoformat(date_str)
+                    if today <= reactivation_date < limit_date:
+                        user_entry = get_user_by_samaccountname(conn, username, attributes)
+                        if user_entry:
+                            items.append({
+                                'cn': get_attr_value(user_entry, 'cn'),
+                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
+                                'title': get_attr_value(user_entry, 'title'),
+                                'location': get_attr_value(user_entry, 'l'),
+                                'department': get_attr_value(user_entry, 'department'),
+                                'company': get_attr_value(user_entry, 'company'),
+                                'scheduled_date': reactivation_date.strftime('%d/%m/%Y')
+                            })
+                except (ValueError, TypeError):
+                    continue
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
         else:
             base_filter = "(&(objectClass=user)(objectCategory=person))"
             category_filters = {

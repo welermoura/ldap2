@@ -175,7 +175,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 sam.textContent = item.sam || '';
 
                 mainInfo.appendChild(name);
-                mainInfo.appendChild(sam);
+
+                if (item.scheduled_date) {
+                    const dateBadge = document.createElement('span');
+                    dateBadge.className = 'badge bg-dark';
+                    dateBadge.textContent = `Data: ${item.scheduled_date}`;
+                    mainInfo.appendChild(dateBadge);
+                } else {
+                    mainInfo.appendChild(sam);
+                }
 
                 const subInfo = document.createElement('p');
                 subInfo.className = 'mb-1 text-muted small';
@@ -185,6 +193,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 a.appendChild(mainInfo);
                 a.appendChild(subInfo);
+
+                if (item.scheduled_date) {
+                    const samInfo = document.createElement('small');
+                    samInfo.className = 'text-muted';
+                    samInfo.textContent = `Login: ${item.sam}`;
+                    a.appendChild(samInfo);
+                }
                 modalContent.appendChild(a);
             });
         }
