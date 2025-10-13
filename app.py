@@ -28,6 +28,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(data_dir, exist_ok=True)
+os.chmod(data_dir, 0o777) # Garante que o diretório de dados seja gravável
 os.makedirs(logs_dir, exist_ok=True)
 
 log_path = os.path.join(logs_dir, 'ad_creator.log')
@@ -35,7 +36,7 @@ logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s -
 app = Flask(__name__)
 
 def get_flask_secret_key():
-    key_file_path = os.path.join(data_dir, 'flask_secret.key') # Movido para data_dir
+    key_file_path = os.path.join(data_dir, 'flask_secret.key')
     if os.path.exists(key_file_path):
         with open(key_file_path, 'r') as f:
             return f.read().strip()
@@ -673,24 +674,26 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    active_users, disabled_users, expiring_passwords = 0, 0, []
+    active_users, disabled_users, locked_last_week, expiring_passwords = 0, 0, 0, []
     try:
         conn = get_read_connection()
         stats = get_dashboard_stats(conn)
         active_users = stats.get('enabled_users', 0)
         disabled_users = stats.get('disabled_users', 0)
-        expiring_passwords = get_expiring_passwords(conn, days=5)
+        locked_last_week = get_accounts_locked_in_last_week(conn)
+        expiring_passwords = get_expiring_passwords(conn, days=15)
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
+        # Os valores padrão já foram definidos acima
 
-    deactivated_last_week = get_deactivated_last_week()
+    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
     pending_reactivations = get_pending_reactivations(days=7)
 
     return render_template(
         'dashboard.html',
         active_users=active_users,
         disabled_users=disabled_users,
-        deactivated_last_week=deactivated_last_week,
+        locked_last_week=locked_last_week,
         pending_reactivations=pending_reactivations,
         expiring_passwords=expiring_passwords
     )
@@ -864,68 +867,47 @@ def api_dashboard_list(category):
         conn = get_read_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        attributes = ['cn', 'sAMAccountName', 'title', 'l', 'department', 'company']
-        items = []
-        next_cookie_b64 = None
 
-        if category == 'deactivated_last_week':
-            seven_days_ago = datetime.now() - timedelta(days=7)
-            usernames = set()
-            try:
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por", line)
-                        if match:
-                            log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S,%f')
-                            if log_time >= seven_days_ago:
-                                usernames.add(match.group(2))
-            except (FileNotFoundError, Exception) as e:
-                logging.error(f"Erro ao processar log para API de desativados: {e}")
+        base_filter = "(&(objectClass=user)(objectCategory=person))"
+        category_filters = {
+            'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
+            'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+            'locked_users': '(lockoutTime>=1)',
+        }
 
-            for username in usernames:
-                user_entry = get_user_by_samaccountname(conn, username, attributes)
-                if user_entry:
-                    items.append({
-                        'cn': get_attr_value(user_entry, 'cn'),
-                        'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                        'title': get_attr_value(user_entry, 'title'),
-                        'location': get_attr_value(user_entry, 'l'),
-                        'department': get_attr_value(user_entry, 'department'),
-                        'company': get_attr_value(user_entry, 'company')
-                    })
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
-        else:
-            base_filter = "(&(objectClass=user)(objectCategory=person))"
-            category_filters = {
-                'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
-                'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+        specific_filter = category_filters.get(category)
+        if not specific_filter:
+            return jsonify({'error': 'Categoria inválida'}), 404
+
+        search_filter = f"(&{base_filter}{specific_filter})"
+
+        attributes = ['cn', 'sAMAccountName', 'title', 'l']
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+
+        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
+        b64_cookie_str = request.args.get('cookie')
+        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
+
+        # Acesso seguro aos atributos usando a função auxiliar
+        items = [
+            {
+                'cn': get_attr_value(e, 'cn'),
+                'sam': get_attr_value(e, 'sAMAccountName'),
+                'title': get_attr_value(e, 'title'),
+                'location': get_attr_value(e, 'l')
             }
-            specific_filter = category_filters.get(category)
-            if not specific_filter:
-                return jsonify({'error': 'Categoria inválida'}), 404
+            for e in conn.entries
+        ]
 
-            search_filter = f"(&{base_filter}{specific_filter})"
-            per_page = 20
-            b64_cookie_str = request.args.get('cookie')
-            paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
+        # Acesso seguro ao cookie de paginação (que é binário)
+        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
 
-            conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
-
-            items = [
-                {
-                    'cn': get_attr_value(e, 'cn'),
-                    'sam': get_attr_value(e, 'sAMAccountName'),
-                    'title': get_attr_value(e, 'title'),
-                    'location': get_attr_value(e, 'l'),
-                    'department': get_attr_value(e, 'department'),
-                    'company': get_attr_value(e, 'company')
-                }
-                for e in conn.entries
-            ]
-
-            paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-            cookie_bytes = paged_results_control.get('value', {}).get('cookie')
-            next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
+        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
         return jsonify({
             'items': items,
@@ -1191,7 +1173,7 @@ def toggle_status(username):
                 save_schedules(schedules)
                 logging.info(f"Agendamento de reativação para '{username}' foi removido devido à reativação manual.")
 
-        logging.info(f"Conta '{username}' foi {action_message} por '{session.get('user_display_name', session.get('ad_user'))}'.")
+        logging.info(f"Conta '{username}' foi {action_message} por '{session.get('ad_user')}'.")
         flash(f"Conta do usuário foi {action_message} com sucesso.", "success")
     except Exception as e:
         flash(f"Erro ao alterar status da conta: {e}", "error")
@@ -1621,23 +1603,23 @@ def get_dashboard_stats(conn):
         logging.error(f"Erro ao buscar estatísticas do dashboard: {e}", exc_info=True)
     return stats
 
-def get_deactivated_last_week():
-    """Conta usuários desativados na última semana a partir do log."""
-    count = 0
-    seven_days_ago = datetime.now() - timedelta(days=7)
+def get_accounts_locked_in_last_week(conn):
+    if not conn:
+        return 0
+    config = load_config()
+    search_base = config.get('AD_SEARCH_BASE')
+    if not search_base: return 0
     try:
-        with open(log_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - INFO - Conta '(.+?)' foi desativada por", line)
-                if match:
-                    log_time = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S,%f')
-                    if log_time >= seven_days_ago:
-                        count += 1
-    except FileNotFoundError:
-        logging.warning("Arquivo de log não encontrado ao verificar desativações da última semana.")
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
+        delta = seven_days_ago - epoch_start
+        filetime_timestamp = int(delta.total_seconds() * 10_000_000)
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(lockoutTime>={filetime_timestamp}))"
+        conn.search(search_base, search_filter, attributes=['cn'], paged_size=1000)
+        return len(conn.entries)
     except Exception as e:
-        logging.error(f"Erro ao ler log para desativações da última semana: {e}", exc_info=True)
-    return count
+        logging.error(f"Erro ao buscar contas bloqueadas na última semana: {e}", exc_info=True)
+        return 0
 
 def get_pending_reactivations(days=7):
     schedules = load_schedules()
