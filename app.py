@@ -1954,9 +1954,9 @@ def address_book():
     try:
         conn = get_read_connection()
         search_base = config.get('AD_SEARCH_BASE')
-        # Filtro inspirado na lógica PHP: busca usuários ativos com nome, sobrenome e email.
-        search_filter = "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(mail=*)(sn=*)(givenName=*))"
-        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
+        # Etapa 1: Busca ampla no LDAP para obter todos os usuários. A filtragem fina será feita no código.
+        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
+        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName', 'givenName', 'sn', 'userAccountControl']
 
         entry_generator = conn.extend.standard.paged_search(
             search_base=search_base,
@@ -1966,11 +1966,19 @@ def address_book():
             generator=True
         )
 
-        # O gerador retorna dicionários, não objetos Entry. Acessamos a chave 'attributes'.
-        users_from_ad = [entry.get('attributes', {}) for entry in entry_generator]
+        all_users = [entry.get('attributes', {}) for entry in entry_generator]
+
+        # Etapa 2: Filtrar os resultados no código Python, replicando a lógica do PHP.
+        filtered_users = []
+        for user in all_users:
+            uac = user.get('userAccountControl', [0])[0]
+            is_disabled = bool(int(uac) & 2)
+
+            if not is_disabled and user.get('mail') and user.get('givenName') and user.get('sn'):
+                filtered_users.append(user)
 
         # Ordenar os resultados pelo nome de exibição
-        users = sorted(users_from_ad, key=lambda u: u.get('displayName', [''])[0].lower())
+        users = sorted(filtered_users, key=lambda u: u.get('displayName', [''])[0].lower())
 
     except Exception as e:
         flash("Ocorreu um erro ao carregar o catálogo de endereços. Por favor, contate o administrador.", "error")
