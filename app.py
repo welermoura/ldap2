@@ -674,7 +674,14 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    context = {}
+    context = {
+        'active_users': 0,
+        'disabled_users': 0,
+        'deactivated_last_week': 0,
+        'pending_reactivations': 0,
+        'pending_deactivations': 0,
+        'expiring_passwords': []
+    }
     try:
         conn = get_read_connection()
         # Permissões para cada card
