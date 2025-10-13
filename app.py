@@ -872,6 +872,20 @@ def api_group_members(group_name):
 @app.route('/api/dashboard_list/<category>')
 @require_auth
 def api_dashboard_list(category):
+    # Mapeia a categoria da API para a permissão de visualização necessária
+    category_to_permission = {
+        'active_users': 'can_view_user_stats',
+        'disabled_users': 'can_view_user_stats',
+        'deactivated_last_week': 'can_view_deactivated_last_week',
+        'pending_reactivations': 'can_view_pending_reactivations',
+        'pending_deactivations': 'can_view_pending_deactivations',
+    }
+    required_permission = category_to_permission.get(category)
+
+    # Se a categoria tiver uma permissão associada, verifique-a
+    if required_permission and not check_permission(view=required_permission):
+        return jsonify({'error': 'Permissão negada para visualizar esta categoria.'}), 403
+
     try:
         conn = get_read_connection()
         config = load_config()
