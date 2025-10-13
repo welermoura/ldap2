@@ -76,10 +76,11 @@
                             <div class="row">
                                 {% set actions = permissions.get(group, {}).get('actions', {}) %}
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_create" {% if actions.get('can_create') %}checked{% endif %}><label class="form-check-label">Criar Usuário</label></div>
-                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_edit" {% if actions.get('can_edit') %}checked{% endif %}><label class="form-check-label">Editar Usuário</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" id="{{ group_id }}_can_edit" name="{{ group }}_can_edit" {% if actions.get('can_edit') %}checked{% endif %} onchange="toggleEditableFields(this)"><label class="form-check-label" for="{{ group_id }}_can_edit">Editar Usuário</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_disable" {% if actions.get('can_disable') %}checked{% endif %}><label class="form-check-label">Ativar/Desativar</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_reset_password" {% if actions.get('can_reset_password') %}checked{% endif %}><label class="form-check-label">Resetar Senha</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_manage_groups" {% if actions.get('can_manage_groups') %}checked{% endif %}><label class="form-check-label">Gerenciar Grupos</label></div>
+                                <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_users" {% if actions.get('can_view_users') %}checked{% endif %}><label class="form-check-label">Visualizar Usuários</label></div>
                             </div>
                             <hr>
                             <h6 class="mb-3">Permissões de Visualização (Dashboard & Exportação)</h6>
@@ -92,16 +93,19 @@
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_view_expiring_passwords" {% if views.get('can_view_expiring_passwords') %}checked{% endif %}><label class="form-check-label">Card: Senhas Expirando</label></div>
                                 <div class="col-md-4 form-check"><input class="form-check-input" type="checkbox" name="{{ group }}_can_export_data" {% if views.get('can_export_data') %}checked{% endif %}><label class="form-check-label">Pode Exportar Dados</label></div>
                             </div>
-                            <hr>
-                            <h6 class="mb-3">Campos Editáveis</h6>
-                            <div class="row">
-                                {% set fields = permissions.get(group, {}).get('fields', []) %}
-                                {% for field, label in available_fields.items() %}
-                                    <div class="col-md-4 form-check">
-                                        <input class="form-check-input" type="checkbox" name="{{ group }}_field_{{ field }}" {% if field in fields %}checked{% endif %}>
-                                        <label class="form-check-label">{{ label }}</label>
-                                    </div>
-                                {% endfor %}
+
+                            <div class="editable-fields-section" style="display: {% if actions.get('can_edit') %}block{% else %}none{% endif %};">
+                                <hr>
+                                <h6 class="mb-3">Campos Editáveis</h6>
+                                <div class="row">
+                                    {% set fields = permissions.get(group, {}).get('fields', []) %}
+                                    {% for field, label in available_fields.items() %}
+                                        <div class="col-md-4 form-check">
+                                            <input class="form-check-input" type="checkbox" name="{{ group }}_field_{{ field }}" {% if field in fields %}checked{% endif %}>
+                                            <label class="form-check-label">{{ label }}</label>
+                                        </div>
+                                    {% endfor %}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -133,6 +137,23 @@
         const isCustom = radioElement.value === 'custom';
         customDiv.style.display = isCustom ? 'block' : 'none';
     }
+
+    function toggleEditableFields(checkboxElement) {
+        const customPermissionsDiv = checkboxElement.closest('.custom-permissions');
+        if (!customPermissionsDiv) return;
+
+        const fieldsSection = customPermissionsDiv.querySelector('.editable-fields-section');
+        if (!fieldsSection) return;
+
+        fieldsSection.style.display = checkboxElement.checked ? 'block' : 'none';
+    }
+
+    // Garante que o estado inicial esteja correto no carregamento da página
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('input[type="checkbox"][name$="_can_edit"]').forEach(function(checkbox) {
+            toggleEditableFields(checkbox);
+        });
+    });
 </script>
 <style>
     .accordion-item {
