@@ -1950,8 +1950,8 @@ def address_book():
             generator=True
         )
 
-        # Usar entry.entry_attributes_as_dict para obter um dicionário direto
-        users_from_ad = [entry.entry_attributes_as_dict for entry in entry_generator]
+        # O gerador retorna dicionários, não objetos Entry. Acessamos a chave 'attributes'.
+        users_from_ad = [entry.get('attributes', {}) for entry in entry_generator]
 
         # Ordenar os resultados pelo nome de exibição
         users = sorted(users_from_ad, key=lambda u: u.get('displayName', [''])[0].lower())
