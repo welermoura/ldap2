@@ -968,17 +968,16 @@ def api_dashboard_list(category):
                 except (ValueError, TypeError):
                     continue
             items = sorted(items, key=lambda x: x.get('cn', '').lower())
-        else:
+
+        elif category in ['active_users', 'disabled_users']:
             base_filter = "(&(objectClass=user)(objectCategory=person))"
             category_filters = {
                 'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
                 'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
             }
             specific_filter = category_filters.get(category)
-            if not specific_filter:
-                return jsonify({'error': 'Categoria inválida'}), 404
-
             search_filter = f"(&{base_filter}{specific_filter})"
+
             per_page = 20
             b64_cookie_str = request.args.get('cookie')
             paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
@@ -1000,6 +999,9 @@ def api_dashboard_list(category):
             paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
             cookie_bytes = paged_results_control.get('value', {}).get('cookie')
             next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+
+        else:
+            return jsonify({'error': 'Categoria inválida'}), 404
 
         return jsonify({
             'items': items,
@@ -1634,6 +1636,7 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_view_users': f'{group}_can_view_users' in request.form,
                     }
                     views = {
                         'can_export_data': f'{group}_can_export_data' in request.form,
