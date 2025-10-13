@@ -22,11 +22,12 @@ logging.basicConfig(
     encoding='utf-8'
 )
 
-CONFIG_FILE = os.path.join(basedir, 'config.json')
-KEY_FILE = os.path.join(basedir, 'secret.key')
-SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
-DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json')
-GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
+data_dir = os.path.join(basedir, 'data') # Define o diretório de dados
+CONFIG_FILE = os.path.join(data_dir, 'config.json')
+KEY_FILE = os.path.join(data_dir, 'secret.key')
+SCHEDULE_FILE = os.path.join(data_dir, 'schedules.json')
+DISABLE_SCHEDULE_FILE = os.path.join(data_dir, 'disable_schedules.json')
+GROUP_SCHEDULE_FILE = os.path.join(data_dir, 'group_schedules.json')
 
 # ==============================================================================
 # Funções de Criptografia e Configuração
