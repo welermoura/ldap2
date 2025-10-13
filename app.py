@@ -1238,7 +1238,8 @@ def view_user(username):
                     password_expiry_info = f"Expirou há {-delta.days} dia(s) (em {expiry_datetime.strftime('%d/%m/%Y')})"
             elif int(expiry_time_ft) == 9223372036854775807 or int(expiry_time_ft) == 0:
                  password_expiry_info = "A senha está configurada para nunca expirar."
-        form = EditUserForm()
+        # Passa um formulário genérico para o template para o token CSRF
+        form = FlaskForm()
         return render_template('view_user.html', user=user, form=form, password_expiry_info=password_expiry_info)
     except Exception as e:
         flash(f"Erro ao buscar detalhes do usuário: {e}", "error")
@@ -1343,6 +1344,40 @@ def schedule_absence(username):
     except Exception as e:
         flash(f"Ocorreu um erro ao agendar a ausência: {e}", "error")
         logging.error(f"Erro em schedule_absence para {username}: {e}", exc_info=True)
+
+    return redirect(url_for('view_user', username=username))
+
+@app.route('/delete_user/<username>', methods=['POST'])
+@require_auth
+@require_permission(action='can_delete_user')
+def delete_user(username):
+    try:
+        conn = get_service_account_connection()
+        user = get_user_by_samaccountname(conn, username, ['title', 'sAMAccountName', 'distinguishedName'])
+        if not user:
+            flash("Usuário não encontrado.", "error")
+            return redirect(url_for('manage_users'))
+
+        confirm_title = request.form.get('confirm_title')
+        confirm_sam = request.form.get('confirm_sam')
+
+        actual_title = get_attr_value(user, 'title') or 'N/A'
+        actual_sam = get_attr_value(user, 'sAMAccountName')
+
+        if confirm_title == actual_title and confirm_sam == actual_sam:
+            conn.delete(user.distinguishedName.value)
+            if conn.result['description'] == 'success':
+                flash(f"Usuário '{username}' foi excluído permanentemente com sucesso.", "success")
+                logging.info(f"Usuário '{username}' foi EXCLUÍDO por '{session.get('user_display_name', session.get('ad_user'))}'.")
+                return redirect(url_for('manage_users'))
+            else:
+                flash(f"Falha ao excluir usuário no Active Directory: {conn.result['message']}", "error")
+        else:
+            flash("A confirmação do cargo ou login falhou. A exclusão foi cancelada.", "error")
+
+    except Exception as e:
+        flash(f"Erro ao excluir usuário: {e}", "error")
+        logging.error(f"Erro em delete_user para {username}: {e}", exc_info=True)
 
     return redirect(url_for('view_user', username=username))
 
@@ -1637,6 +1672,7 @@ def permissions():
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
                         'can_view_users': f'{group}_can_view_users' in request.form,
+                        'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     views = {
                         'can_export_data': f'{group}_can_export_data' in request.form,
