@@ -284,7 +284,23 @@ def validate_sam_account(form, field):
         raise ValidationError('O login pode conter apenas letras, números e os caracteres ".", "-" e "_".')
 
 def get_attr_value(user, attr):
-    return user[attr].value if attr in user and user[attr].value is not None else ''
+    """
+    Função auxiliar polimórfica para extrair um valor de atributo de forma segura,
+    seja de um objeto ldap3.Entry ou de um dicionário.
+    """
+    # Se 'user' for um dicionário (como os do /catalogo)
+    if isinstance(user, dict):
+        value = user.get(attr)
+        # Os valores dos atributos no dicionário podem ser listas
+        if isinstance(value, list) and value:
+            return value[0]
+        return value if value is not None else ''
+
+    # Se 'user' for um objeto ldap3.Entry (comportamento original)
+    if attr in user and hasattr(user[attr], 'value'):
+        return user[attr].value if user[attr].value is not None else ''
+
+    return ''
 
 def filetime_to_datetime(ft):
     EPOCH_AS_FILETIME = 116444736000000000
