@@ -155,14 +155,37 @@ document.addEventListener('DOMContentLoaded', function() {
         function renderModalList(data) {
             modalContent.innerHTML = '';
             if (data.length === 0) {
-                modalContent.innerHTML = '<div class="list-group-item">Nenhum item encontrado.</div>';
+                modalContent.innerHTML = '<div class="list-group-item text-muted">Nenhum item encontrado.</div>';
                 return;
             }
             data.forEach(item => {
                 const a = document.createElement('a');
                 a.href = `/view_user/${item.sam}`;
-                a.className = 'list-group-item list-group-item-action';
-                a.textContent = `${item.cn} (${item.sam})`;
+                a.className = 'list-group-item list-group-item-action flex-column align-items-start';
+
+                const mainInfo = document.createElement('div');
+                mainInfo.className = 'd-flex w-100 justify-content-between';
+
+                const name = document.createElement('h6');
+                name.className = 'mb-1';
+                name.textContent = item.cn || 'Nome não disponível';
+
+                const sam = document.createElement('small');
+                sam.className = 'text-muted';
+                sam.textContent = item.sam || '';
+
+                mainInfo.appendChild(name);
+                mainInfo.appendChild(sam);
+
+                const subInfo = document.createElement('p');
+                subInfo.className = 'mb-1 text-muted small';
+
+                // Constrói a string de informações secundárias, ignorando valores vazios
+                const details = [item.title, item.department, item.company].filter(Boolean).join(' • ');
+                subInfo.textContent = details || 'Sem detalhes adicionais';
+
+                a.appendChild(mainInfo);
+                a.appendChild(subInfo);
                 modalContent.appendChild(a);
             });
         }

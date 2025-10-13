@@ -864,7 +864,8 @@ def api_dashboard_list(category):
         conn = get_read_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        attributes = ['cn', 'sAMAccountName', 'title', 'l']
+        # Adicionados 'department' e 'company'
+        attributes = ['cn', 'sAMAccountName', 'title', 'l', 'department', 'company']
         items = []
         next_cookie_b64 = None
 
@@ -883,7 +884,9 @@ def api_dashboard_list(category):
                                 'cn': get_attr_value(user_entry, 'cn'),
                                 'sam': get_attr_value(user_entry, 'sAMAccountName'),
                                 'title': get_attr_value(user_entry, 'title'),
-                                'location': get_attr_value(user_entry, 'l')
+                                'location': get_attr_value(user_entry, 'l'),
+                                'department': get_attr_value(user_entry, 'department'),
+                                'company': get_attr_value(user_entry, 'company')
                             })
                 except (ValueError, TypeError):
                     continue # Ignora entradas de agendamento malformadas
@@ -919,7 +922,9 @@ def api_dashboard_list(category):
                     'cn': get_attr_value(e, 'cn'),
                     'sam': get_attr_value(e, 'sAMAccountName'),
                     'title': get_attr_value(e, 'title'),
-                    'location': get_attr_value(e, 'l')
+                    'location': get_attr_value(e, 'l'),
+                    'department': get_attr_value(e, 'department'),
+                    'company': get_attr_value(e, 'company')
                 }
                 for e in conn.entries
             ]
