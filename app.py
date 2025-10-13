@@ -674,29 +674,31 @@ def index():
 @app.route('/dashboard')
 @require_auth
 def dashboard():
-    active_users, disabled_users, expiring_passwords = 0, 0, []
+    context = {}
     try:
         conn = get_read_connection()
-        stats = get_dashboard_stats(conn)
-        active_users = stats.get('enabled_users', 0)
-        disabled_users = stats.get('disabled_users', 0)
-        expiring_passwords = get_expiring_passwords(conn, days=5)
+        # Permissões para cada card
+        if check_permission(view='can_view_user_stats'):
+            stats = get_dashboard_stats(conn)
+            context['active_users'] = stats.get('enabled_users', 0)
+            context['disabled_users'] = stats.get('disabled_users', 0)
+
+        if check_permission(view='can_view_deactivated_last_week'):
+            context['deactivated_last_week'] = get_deactivated_last_week()
+
+        if check_permission(view='can_view_pending_reactivations'):
+            context['pending_reactivations'] = get_pending_reactivations(days=7)
+
+        if check_permission(view='can_view_pending_deactivations'):
+            context['pending_deactivations'] = get_pending_deactivations(days=7)
+
+        if check_permission(view='can_view_expiring_passwords'):
+            context['expiring_passwords'] = get_expiring_passwords(conn, days=5)
+
     except Exception as e:
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
 
-    deactivated_last_week = get_deactivated_last_week()
-    pending_reactivations = get_pending_reactivations(days=7)
-    pending_deactivations = get_pending_deactivations(days=7)
-
-    return render_template(
-        'dashboard.html',
-        active_users=active_users,
-        disabled_users=disabled_users,
-        deactivated_last_week=deactivated_last_week,
-        pending_reactivations=pending_reactivations,
-        pending_deactivations=pending_deactivations,
-        expiring_passwords=expiring_passwords
-    )
+    return render_template('dashboard.html', **context)
 
 @app.route('/create_user_form', methods=['GET', 'POST'])
 @require_auth
@@ -1613,12 +1615,17 @@ def permissions():
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
                     }
                     views = {
-                        'can_export_data': f'{group}_can_export_data' in request.form
+                        'can_export_data': f'{group}_can_export_data' in request.form,
+                        'can_view_user_stats': f'{group}_can_view_user_stats' in request.form,
+                        'can_view_deactivated_last_week': f'{group}_can_view_deactivated_last_week' in request.form,
+                        'can_view_pending_reactivations': f'{group}_can_view_pending_reactivations' in request.form,
+                        'can_view_pending_deactivations': f'{group}_can_view_pending_deactivations' in request.form,
+                        'can_view_expiring_passwords': f'{group}_can_view_expiring_passwords' in request.form,
                     }
                     fields = [field for field in available_fields if f'{group}_field_{field}' in request.form]
                     permissions_data[group] = {'type': 'custom', 'actions': actions, 'fields': fields, 'views': views}
                 elif perm_type == 'none':
-                     permissions_data[group] = {'type': 'none'} # Explicitly set to none
+                     permissions_data[group] = {'type': 'none'}
 
             save_permissions(permissions_data)
             flash('Permissões salvas com sucesso!', 'success')
