@@ -113,6 +113,7 @@
     {% endif %}
 
     <!-- Painel de Ações Rápidas -->
+    {% if check_permission(action='can_create') or check_permission(action='can_edit') or check_permission(action='can_manage_groups') or check_permission(view='can_export_data') %}
     <div class="col-lg-4 mb-4">
         <div class="card glass-card h-100">
             <div class="card-header">
@@ -146,6 +147,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 
 <!-- Modal para exibir listas de dados -->
