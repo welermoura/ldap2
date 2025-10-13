@@ -1924,5 +1924,36 @@ def export_ad_data():
         flash("Erro ao gerar exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
 
+@app.route('/catalogo')
+@require_auth
+def address_book():
+    users = []
+    try:
+        conn = get_read_connection()
+        search_base = load_config().get('AD_SEARCH_BASE')
+        # Filtro para buscar apenas usuários que tenham todos os campos essenciais preenchidos
+        search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
+        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
+
+        entry_generator = conn.extend.standard.paged_search(
+            search_base=search_base,
+            search_filter=search_filter,
+            attributes=attributes_to_fetch,
+            paged_size=1000,
+            generator=True
+        )
+
+        # Usar entry.entry_attributes_as_dict para obter um dicionário direto
+        users_from_ad = [entry.entry_attributes_as_dict for entry in entry_generator]
+
+        # Ordenar os resultados pelo nome de exibição
+        users = sorted(users_from_ad, key=lambda u: u.get('displayName', [''])[0].lower())
+
+    except Exception as e:
+        flash("Ocorreu um erro ao carregar o catálogo de endereços. Por favor, contate o administrador.", "error")
+        logging.error(f"Erro ao carregar o catálogo de endereços: {e}", exc_info=True)
+
+    return render_template('catalogo.html', users=users)
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
