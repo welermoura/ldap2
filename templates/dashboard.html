@@ -16,9 +16,9 @@
 
 {% block content %}
 <!-- Linha dos Cards de Estatísticas -->
-<div class="row">
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-4">
     {% if check_permission(view='can_view_user_stats') %}
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="active_users" data-title="Contas Ativas">
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="active_users" data-title="Contas Ativas">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -29,7 +29,7 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="disabled_users" data-title="Contas Desativadas">
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="disabled_users" data-title="Contas Desativadas">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -43,7 +43,7 @@
     {% endif %}
 
     {% if check_permission(view='can_view_deactivated_last_week') %}
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="deactivated_last_week" data-title="Desativados (Última Semana)">
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="deactivated_last_week" data-title="Desativados (Última Semana)">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -57,7 +57,7 @@
     {% endif %}
 
     {% if check_permission(view='can_view_pending_reactivations') %}
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_reactivations" data-title="Reativações Pendentes (Próx. 7 dias)">
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_reactivations" data-title="Reativações Pendentes (Próx. 7 dias)">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -71,7 +71,7 @@
     {% endif %}
 
     {% if check_permission(view='can_view_pending_deactivations') %}
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_deactivations" data-title="Desativações Agendadas (Próx. 7 dias)">
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_deactivations" data-title="Desativações Agendadas (Próx. 7 dias)">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
