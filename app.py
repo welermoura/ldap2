@@ -1759,7 +1759,7 @@ def get_expiring_passwords(conn, days=15):
     if not search_base: return expiring_users
     try:
         search_filter = "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
-        attributes = ['cn', 'sAMAccountName', 'msDS-UserPasswordExpiryTimeComputed']
+        attributes = ['cn', 'sAMAccountName', 'msDS-UserPasswordExpiryTimeComputed', 'title', 'department', 'l']
         entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=attributes, paged_size=1000)
         now_utc = datetime.now(timezone.utc)
         expiration_limit = now_utc + timedelta(days=days)
@@ -1770,7 +1770,14 @@ def get_expiring_passwords(conn, days=15):
                 expiry_datetime = filetime_to_datetime(expiry_time_ft)
                 if expiry_datetime and now_utc < expiry_datetime < expiration_limit:
                     delta = expiry_datetime - now_utc
-                    expiring_users.append({'cn': attributes.get('cn'), 'sam': attributes.get('sAMAccountName'), 'expires_in_days': delta.days + 1})
+                    expiring_users.append({
+                        'cn': attributes.get('cn'),
+                        'sam': attributes.get('sAMAccountName'),
+                        'expires_in_days': delta.days + 1,
+                        'title': attributes.get('title'),
+                        'department': attributes.get('department'),
+                        'location': attributes.get('l')
+                    })
     except Exception as e:
         logging.error(f"Erro ao buscar senhas expirando: {e}", exc_info=True)
         return []

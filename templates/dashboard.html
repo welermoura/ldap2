@@ -92,7 +92,7 @@
 
     <!-- Painel de Senhas Expirando -->
     {% if show_expiring_passwords %}
-    <div class="col-lg-8 mb-4">
+    <div class="col-lg-7 mb-4">
         <div class="card glass-card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-key me-2 text-warning"></i>Senhas Expirando (Próximos 5 dias)</h5>
@@ -117,7 +117,7 @@
 
     <!-- Painel de Ações Rápidas -->
     {% if show_quick_actions %}
-    <div class="{% if show_expiring_passwords %}col-lg-4{% else %}col-lg-12{% endif %} mb-4">
+    <div class="{% if show_expiring_passwords %}col-lg-5{% else %}col-lg-12{% endif %} mb-4">
         <div class="card glass-card h-100">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fas fa-rocket me-2"></i>Ações Rápidas</h5>
@@ -297,24 +297,36 @@ document.addEventListener('DOMContentLoaded', function() {
         const pageData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
         pageData.forEach(user => {
-            const listItem = document.createElement('div');
-            listItem.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center glass-list-item';
+            const listItem = document.createElement('a');
+            listItem.href = `/view_user/${user.sam}`;
+            listItem.className = 'list-group-item list-group-item-action flex-column align-items-start glass-list-item';
 
-            const userInfo = document.createElement('div');
-            const userName = document.createElement('strong');
-            userName.textContent = user.cn;
-            const userSam = document.createElement('small');
-            userSam.className = 'ms-2 text-muted';
-            userSam.textContent = `(${user.sam})`;
-            userInfo.appendChild(userName);
-            userInfo.appendChild(userSam);
+            const mainInfo = document.createElement('div');
+            mainInfo.className = 'd-flex w-100 justify-content-between';
+
+            const name = document.createElement('h6');
+            name.className = 'mb-1';
+            name.textContent = user.cn || 'Nome não disponível';
 
             const expiryBadge = document.createElement('span');
             expiryBadge.className = 'badge bg-warning text-dark';
             expiryBadge.textContent = `Expira em ${user.expires_in_days} dia(s)`;
 
-            listItem.appendChild(userInfo);
-            listItem.appendChild(expiryBadge);
+            mainInfo.appendChild(name);
+            mainInfo.appendChild(expiryBadge);
+
+            const subInfo = document.createElement('p');
+            subInfo.className = 'mb-1 text-muted small';
+            const details = [user.title, user.department, user.location].filter(Boolean).join(' • ');
+            subInfo.textContent = details || 'Sem detalhes adicionais';
+
+            const samInfo = document.createElement('small');
+            samInfo.className = 'text-muted';
+            samInfo.textContent = `Login: ${user.sam}`;
+
+            listItem.appendChild(mainInfo);
+            listItem.appendChild(subInfo);
+            listItem.appendChild(samInfo);
             listContainer.appendChild(listItem);
         });
         renderPagination();
