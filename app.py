@@ -23,17 +23,19 @@ import base64
 # Configuração Base
 # ==============================================================================
 basedir = os.path.abspath(os.path.dirname(__file__))
+
+# Criação dos diretórios de dados e logs
+data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
+os.makedirs(data_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
+
 log_path = os.path.join(logs_dir, 'ad_creator.log')
 logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
 app = Flask(__name__)
 
 def get_flask_secret_key():
-    env_key = os.environ.get('SECRET_KEY')
-    if env_key:
-        return env_key
-    key_file_path = os.path.join(basedir, 'flask_secret.key')
+    key_file_path = os.path.join(data_dir, 'flask_secret.key') # Movido para data_dir
     if os.path.exists(key_file_path):
         with open(key_file_path, 'r') as f:
             return f.read().strip()
@@ -45,11 +47,11 @@ def get_flask_secret_key():
         return new_key
 
 app.secret_key = get_flask_secret_key()
-SCHEDULE_FILE = os.path.join(basedir, 'schedules.json')
-DISABLE_SCHEDULE_FILE = os.path.join(basedir, 'disable_schedules.json') # Novo arquivo
-PERMISSIONS_FILE = os.path.join(basedir, 'permissions.json')
-KEY_FILE = os.path.join(basedir, 'secret.key')
-CONFIG_FILE = os.path.join(basedir, 'config.json')
+SCHEDULE_FILE = os.path.join(data_dir, 'schedules.json')
+DISABLE_SCHEDULE_FILE = os.path.join(data_dir, 'disable_schedules.json')
+PERMISSIONS_FILE = os.path.join(data_dir, 'permissions.json')
+KEY_FILE = os.path.join(data_dir, 'secret.key')
+CONFIG_FILE = os.path.join(data_dir, 'config.json')
 
 
 # ==============================================================================
@@ -112,7 +114,7 @@ def save_config(config):
 # Funções Auxiliares de User/Schedule/Permissions (sem alteração)
 # ==============================================================================
 def load_user():
-    user_path = os.path.join(basedir, 'user.json')
+    user_path = os.path.join(data_dir, 'user.json')
     try:
         with open(user_path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -120,7 +122,7 @@ def load_user():
         return None
 
 def save_user(user_data):
-    user_path = os.path.join(basedir, 'user.json')
+    user_path = os.path.join(data_dir, 'user.json')
     with open(user_path, 'w', encoding='utf-8') as f:
         json.dump(user_data, f, indent=4)
 
@@ -146,7 +148,7 @@ def save_disable_schedules(schedules):
     with open(DISABLE_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedules, f, indent=4)
 
-GROUP_SCHEDULE_FILE = os.path.join(basedir, 'group_schedules.json')
+GROUP_SCHEDULE_FILE = os.path.join(data_dir, 'group_schedules.json')
 
 def load_group_schedules():
     try:
