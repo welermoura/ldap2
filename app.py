@@ -1954,8 +1954,8 @@ def address_book():
     try:
         conn = get_read_connection()
         search_base = config.get('AD_SEARCH_BASE')
-        # Filtro para buscar todos os usuários, não apenas os que têm todos os campos preenchidos.
-        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
+        # Filtro inspirado na lógica PHP: busca usuários ativos com nome, sobrenome e email.
+        search_filter = "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(mail=*)(sn=*)(givenName=*))"
         attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
 
         entry_generator = conn.extend.standard.paged_search(
