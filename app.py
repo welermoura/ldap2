@@ -683,8 +683,9 @@ def dashboard():
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
         # Os valores padrão já foram definidos acima
 
-    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
+    # Funções que não dependem de uma conexão AD
     pending_reactivations = get_pending_reactivations(days=7)
+    pending_deactivations = get_pending_deactivations(days=7)
 
     return render_template(
         'dashboard.html',
@@ -692,6 +693,7 @@ def dashboard():
         disabled_users=disabled_users,
         locked_last_week=locked_last_week,
         pending_reactivations=pending_reactivations,
+        pending_deactivations=pending_deactivations,
         expiring_passwords=expiring_passwords
     )
 
@@ -886,10 +888,35 @@ def api_dashboard_list(category):
                                 'title': get_attr_value(user_entry, 'title'),
                                 'location': get_attr_value(user_entry, 'l'),
                                 'department': get_attr_value(user_entry, 'department'),
-                                'company': get_attr_value(user_entry, 'company')
+                                'company': get_attr_value(user_entry, 'company'),
+                                'scheduled_date': reactivation_date.strftime('%d/%m/%Y')
                             })
                 except (ValueError, TypeError):
                     continue # Ignora entradas de agendamento malformadas
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+
+        elif category == 'pending_deactivations':
+            schedules = load_disable_schedules()
+            today = date.today()
+            limit_date = today + timedelta(days=7)
+
+            for username, date_str in schedules.items():
+                try:
+                    deactivation_date = date.fromisoformat(date_str)
+                    if today <= deactivation_date < limit_date:
+                        user_entry = get_user_by_samaccountname(conn, username, attributes)
+                        if user_entry:
+                            items.append({
+                                'cn': get_attr_value(user_entry, 'cn'),
+                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
+                                'title': get_attr_value(user_entry, 'title'),
+                                'location': get_attr_value(user_entry, 'l'),
+                                'department': get_attr_value(user_entry, 'department'),
+                                'company': get_attr_value(user_entry, 'company'),
+                                'scheduled_date': deactivation_date.strftime('%d/%m/%Y')
+                            })
+                except (ValueError, TypeError):
+                    continue
             items = sorted(items, key=lambda x: x.get('cn', '').lower())
 
         else:
@@ -1654,6 +1681,21 @@ def get_pending_reactivations(days=7):
         try:
             reactivation_date = date.fromisoformat(date_str)
             if today <= reactivation_date < limit_date:
+                count += 1
+        except (ValueError, TypeError):
+            continue
+    return count
+
+def get_pending_deactivations(days=7):
+    """Conta o número de desativações agendadas para os próximos X dias."""
+    schedules = load_disable_schedules()
+    count = 0
+    today = date.today()
+    limit_date = today + timedelta(days=days)
+    for username, date_str in schedules.items():
+        try:
+            deactivation_date = date.fromisoformat(date_str)
+            if today <= deactivation_date < limit_date:
                 count += 1
         except (ValueError, TypeError):
             continue
