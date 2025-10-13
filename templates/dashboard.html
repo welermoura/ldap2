@@ -15,6 +15,29 @@
 {% endblock %}
 
 {% block content %}
+{% set show_quick_actions = check_permission(action='can_create') or check_permission(action='can_edit') or check_permission(action='can_manage_groups') or check_permission(view='can_export_data') %}
+{% if show_quick_actions %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <h5 class="card-title mb-3"><i class="fas fa-rocket me-2"></i>Ações Rápidas</h5>
+        <div class="d-flex flex-wrap gap-2 justify-content-center">
+            {% if check_permission(action='can_create') %}
+            <a href="{{ url_for('create_user_form') }}" class="btn btn-primary"><i class="fas fa-user-plus me-2"></i>Criar Usuário</a>
+            {% endif %}
+            {% if check_permission(action='can_edit') %}
+            <a href="{{ url_for('manage_users') }}" class="btn btn-secondary"><i class="fas fa-users-cog me-2"></i>Gerenciar Usuários</a>
+            {% endif %}
+            {% if check_permission(action='can_manage_groups') %}
+            <a href="{{ url_for('group_management') }}" class="btn btn-info"><i class="fas fa-layer-group me-2"></i>Gerenciar Grupos</a>
+            {% endif %}
+            {% if check_permission(view='can_export_data') %}
+            <a href="{{ url_for('export_ad_data') }}" class="btn btn-success"><i class="fas fa-file-csv me-2"></i>Exportar Base AD</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Linha dos Cards de Estatísticas -->
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-4 justify-content-center mb-4">
     {% if check_permission(view='can_view_user_stats') %}
@@ -88,11 +111,10 @@
 <!-- Linha dos Painéis Principais -->
 <div class="row">
     {% set show_expiring_passwords = check_permission(view='can_view_expiring_passwords') %}
-    {% set show_quick_actions = check_permission(action='can_create') or check_permission(action='can_edit') or check_permission(action='can_manage_groups') or check_permission(view='can_export_data') %}
 
     <!-- Painel de Senhas Expirando -->
     {% if show_expiring_passwords %}
-    <div class="col-lg-7 mb-4">
+    <div class="col-12 mb-4">
         <div class="card glass-card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-key me-2 text-warning"></i>Senhas Expirando (Próximos 5 dias)</h5>
@@ -110,43 +132,6 @@
                 <nav id="expiring-pagination-controls" class="d-flex align-items-center gap-1">
                     <!-- Controles de paginação serão gerados por JavaScript -->
                 </nav>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Painel de Ações Rápidas -->
-    {% if show_quick_actions %}
-    <div class="{% if show_expiring_passwords %}col-lg-5{% else %}col-lg-12{% endif %} mb-4">
-        <div class="card glass-card h-100">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="fas fa-rocket me-2"></i>Ações Rápidas</h5>
-            </div>
-            <div class="list-group list-group-flush">
-                {% if check_permission(action='can_create') %}
-                <a href="{{ url_for('create_user_form') }}" class="list-group-item list-group-item-action glass-list-item">
-                    <h6 class="mb-1"><i class="fas fa-user-plus me-2 text-primary"></i>Criar Novo Usuário</h6>
-                    <small class="text-muted">Crie um novo usuário no AD usando um modelo.</small>
-                </a>
-                {% endif %}
-                {% if check_permission(action='can_edit') %}
-                <a href="{{ url_for('manage_users') }}" class="list-group-item list-group-item-action glass-list-item">
-                    <h6 class="mb-1"><i class="fas fa-users-cog me-2 text-secondary"></i>Gerenciar Usuários</h6>
-                    <small class="text-muted">Busque, edite e gerencie usuários existentes.</small>
-                </a>
-                {% endif %}
-                {% if check_permission(action='can_manage_groups') %}
-                <a href="{{ url_for('group_management') }}" class="list-group-item list-group-item-action glass-list-item">
-                    <h6 class="mb-1"><i class="fas fa-layer-group me-2 text-info"></i>Gerenciar Grupos</h6>
-                    <small class="text-muted">Adicione ou remova membros de grupos.</small>
-                </a>
-                {% endif %}
-                {% if check_permission(view='can_export_data') %}
-                <a href="{{ url_for('export_ad_data') }}" class="list-group-item list-group-item-action glass-list-item">
-                    <h6 class="mb-1"><i class="fas fa-file-csv me-2 text-success"></i>Exportar Base AD</h6>
-                    <small class="text-muted">Exporte os dados dos usuários para um arquivo CSV.</small>
-                </a>
-                {% endif %}
             </div>
         </div>
     </div>

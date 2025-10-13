@@ -373,6 +373,11 @@ class EditUserForm(FlaskForm):
     company = StringField('Empresa')
     submit = SubmitField('Salvar Alterações')
 
+class DeleteUserForm(FlaskForm):
+    confirm_title = StringField('Confirmar Cargo', validators=[DataRequired()])
+    confirm_sam = StringField('Confirmar Login', validators=[DataRequired()])
+    submit = SubmitField('Eu entendo as consequências, excluir este usuário')
+
 # ==============================================================================
 # Funções Auxiliares do Active Directory
 # ==============================================================================
@@ -1219,7 +1224,7 @@ def filetime_to_datetime(ft):
 @require_auth
 def view_user(username):
     try:
-        conn = get_read_connection() # Alterado para usar a conexão de leitura
+        conn = get_read_connection()
         attributes = ['*', 'msDS-UserPasswordExpiryTimeComputed']
         user = get_user_by_samaccountname(conn, username, attributes=attributes)
         if not user:
@@ -1238,9 +1243,11 @@ def view_user(username):
                     password_expiry_info = f"Expirou há {-delta.days} dia(s) (em {expiry_datetime.strftime('%d/%m/%Y')})"
             elif int(expiry_time_ft) == 9223372036854775807 or int(expiry_time_ft) == 0:
                  password_expiry_info = "A senha está configurada para nunca expirar."
-        # Passa um formulário genérico para o template para o token CSRF
-        form = FlaskForm()
-        return render_template('view_user.html', user=user, form=form, password_expiry_info=password_expiry_info)
+
+        # Passa ambos os formulários para o template
+        form = EditUserForm() # Para os formulários existentes
+        delete_form = DeleteUserForm() # Para o modal de exclusão
+        return render_template('view_user.html', user=user, form=form, delete_form=delete_form, password_expiry_info=password_expiry_info)
     except Exception as e:
         flash(f"Erro ao buscar detalhes do usuário: {e}", "error")
         logging.error(f"Erro ao buscar detalhes do usuário para {username}: {e}", exc_info=True)
@@ -1351,33 +1358,38 @@ def schedule_absence(username):
 @require_auth
 @require_permission(action='can_delete_user')
 def delete_user(username):
-    try:
-        conn = get_service_account_connection()
-        user = get_user_by_samaccountname(conn, username, ['title', 'sAMAccountName', 'distinguishedName'])
-        if not user:
-            flash("Usuário não encontrado.", "error")
-            return redirect(url_for('manage_users'))
-
-        confirm_title = request.form.get('confirm_title')
-        confirm_sam = request.form.get('confirm_sam')
-
-        actual_title = get_attr_value(user, 'title') or 'N/A'
-        actual_sam = get_attr_value(user, 'sAMAccountName')
-
-        if confirm_title == actual_title and confirm_sam == actual_sam:
-            conn.delete(user.distinguishedName.value)
-            if conn.result['description'] == 'success':
-                flash(f"Usuário '{username}' foi excluído permanentemente com sucesso.", "success")
-                logging.info(f"Usuário '{username}' foi EXCLUÍDO por '{session.get('user_display_name', session.get('ad_user'))}'.")
+    form = DeleteUserForm()
+    if form.validate_on_submit():
+        try:
+            conn = get_service_account_connection()
+            user = get_user_by_samaccountname(conn, username, ['title', 'sAMAccountName', 'distinguishedName'])
+            if not user:
+                flash("Usuário não encontrado.", "error")
                 return redirect(url_for('manage_users'))
-            else:
-                flash(f"Falha ao excluir usuário no Active Directory: {conn.result['message']}", "error")
-        else:
-            flash("A confirmação do cargo ou login falhou. A exclusão foi cancelada.", "error")
 
-    except Exception as e:
-        flash(f"Erro ao excluir usuário: {e}", "error")
-        logging.error(f"Erro em delete_user para {username}: {e}", exc_info=True)
+            confirm_title = form.confirm_title.data
+            confirm_sam = form.confirm_sam.data
+
+            actual_title = get_attr_value(user, 'title') or 'N/A'
+            actual_sam = get_attr_value(user, 'sAMAccountName')
+
+            if confirm_title == actual_title and confirm_sam == actual_sam:
+                conn.delete(user.distinguishedName.value)
+                if conn.result['description'] == 'success':
+                    flash(f"Usuário '{username}' foi excluído permanentemente com sucesso.", "success")
+                    logging.info(f"Usuário '{username}' foi EXCLUÍDO por '{session.get('user_display_name', session.get('ad_user'))}'.")
+                    return redirect(url_for('manage_users'))
+                else:
+                    flash(f"Falha ao excluir usuário no Active Directory: {conn.result['message']}", "error")
+            else:
+                flash("A confirmação do cargo ou login falhou. A exclusão foi cancelada.", "error")
+
+        except Exception as e:
+            flash(f"Erro ao excluir usuário: {e}", "error")
+            logging.error(f"Erro em delete_user para {username}: {e}", exc_info=True)
+    else:
+        # Se a validação do formulário falhar (ex: CSRF inválido), exibe uma mensagem de erro.
+        flash("Erro de validação do formulário. A exclusão foi cancelada.", "danger")
 
     return redirect(url_for('view_user', username=username))
 
