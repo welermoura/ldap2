@@ -317,16 +317,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const subInfo = document.createElement('p');
             subInfo.className = 'mb-1 text-muted small';
-            const details = [user.title, user.department, user.location].filter(Boolean).join(' • ');
+            const details = [`Login: ${user.sam}`, user.title, user.department, user.location].filter(Boolean).join(' • ');
             subInfo.textContent = details || 'Sem detalhes adicionais';
-
-            const samInfo = document.createElement('small');
-            samInfo.className = 'text-muted';
-            samInfo.textContent = `Login: ${user.sam}`;
 
             listItem.appendChild(mainInfo);
             listItem.appendChild(subInfo);
-            listItem.appendChild(samInfo);
             listContainer.appendChild(listItem);
         });
         renderPagination();
