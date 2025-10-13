@@ -39,7 +39,7 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="locked_users" data-title="Contas Bloqueadas (Última Semana)">
+    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="locked_users" data-title="Contas Bloqueadas (Total)">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -50,7 +50,7 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_reactivations" data-title="Reativações Pendentes (Próx. 7 dias)">
+    <div class="col-lg-3 col-md-6 mb-4">
         <div class="card glass-card h-100">
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
@@ -58,17 +58,6 @@
                     <div class="fs-2 fw-bold text-info">{{ pending_reactivations }}</div>
                 </div>
                 <div class="fs-2 text-info opacity-75"><i class="fas fa-calendar-check"></i></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-3 col-md-6 mb-4 dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_deactivations" data-title="Desativações Agendadas (Próx. 7 dias)">
-        <div class="card glass-card h-100">
-            <div class="card-body d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="text-muted text-uppercase fs-7">Desativações (Próx. 7 dias)</div>
-                    <div class="fs-2 fw-bold text-secondary">{{ pending_deactivations }}</div>
-                </div>
-                <div class="fs-2 text-secondary opacity-75"><i class="fas fa-calendar-times"></i></div>
             </div>
         </div>
     </div>
@@ -166,53 +155,14 @@ document.addEventListener('DOMContentLoaded', function() {
         function renderModalList(data) {
             modalContent.innerHTML = '';
             if (data.length === 0) {
-                modalContent.innerHTML = '<div class="list-group-item text-muted">Nenhum item encontrado.</div>';
+                modalContent.innerHTML = '<div class="list-group-item">Nenhum item encontrado.</div>';
                 return;
             }
             data.forEach(item => {
                 const a = document.createElement('a');
                 a.href = `/view_user/${item.sam}`;
-                a.className = 'list-group-item list-group-item-action flex-column align-items-start';
-
-                const mainInfo = document.createElement('div');
-                mainInfo.className = 'd-flex w-100 justify-content-between';
-
-                const name = document.createElement('h6');
-                name.className = 'mb-1';
-                name.textContent = item.cn || 'Nome não disponível';
-
-                const sam = document.createElement('small');
-                sam.className = 'text-muted';
-                sam.textContent = item.sam || '';
-
-                mainInfo.appendChild(name);
-
-                // Adiciona a data agendada se existir
-                if (item.scheduled_date) {
-                    const dateBadge = document.createElement('span');
-                    dateBadge.className = 'badge bg-dark';
-                    dateBadge.textContent = `Data: ${item.scheduled_date}`;
-                    mainInfo.appendChild(dateBadge);
-                } else {
-                    mainInfo.appendChild(sam);
-                }
-
-                const subInfo = document.createElement('p');
-                subInfo.className = 'mb-1 text-muted small';
-
-                const details = [item.title, item.department, item.company].filter(Boolean).join(' • ');
-                subInfo.textContent = details || 'Sem detalhes adicionais';
-
-                a.appendChild(mainInfo);
-                a.appendChild(subInfo);
-
-                // Adiciona o SAM como uma linha separada se a data estiver presente
-                if (item.scheduled_date) {
-                    const samInfo = document.createElement('small');
-                    samInfo.className = 'text-muted';
-                    samInfo.textContent = `Login: ${item.sam}`;
-                    a.appendChild(samInfo);
-                }
+                a.className = 'list-group-item list-group-item-action';
+                a.textContent = `${item.cn} (${item.sam})`;
                 modalContent.appendChild(a);
             });
         }

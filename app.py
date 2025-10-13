@@ -683,9 +683,8 @@ def dashboard():
         flash(f"Erro ao carregar dados do dashboard: {e}", "error")
         # Os valores padrão já foram definidos acima
 
-    # Funções que não dependem de uma conexão AD
+    # Esta função não depende de uma conexão AD, então pode ser chamada fora do try/except
     pending_reactivations = get_pending_reactivations(days=7)
-    pending_deactivations = get_pending_deactivations(days=7)
 
     return render_template(
         'dashboard.html',
@@ -693,7 +692,6 @@ def dashboard():
         disabled_users=disabled_users,
         locked_last_week=locked_last_week,
         pending_reactivations=pending_reactivations,
-        pending_deactivations=pending_deactivations,
         expiring_passwords=expiring_passwords
     )
 
@@ -866,99 +864,47 @@ def api_dashboard_list(category):
         conn = get_read_connection()
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
-        # Adicionados 'department' e 'company'
-        attributes = ['cn', 'sAMAccountName', 'title', 'l', 'department', 'company']
-        items = []
-        next_cookie_b64 = None
 
-        if category == 'pending_reactivations':
-            schedules = load_schedules()
-            today = date.today()
-            limit_date = today + timedelta(days=7)
+        base_filter = "(&(objectClass=user)(objectCategory=person))"
+        category_filters = {
+            'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
+            'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
+            'locked_users': '(lockoutTime>=1)',
+        }
 
-            for username, date_str in schedules.items():
-                try:
-                    reactivation_date = date.fromisoformat(date_str)
-                    if today <= reactivation_date < limit_date:
-                        user_entry = get_user_by_samaccountname(conn, username, attributes)
-                        if user_entry:
-                            items.append({
-                                'cn': get_attr_value(user_entry, 'cn'),
-                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                                'title': get_attr_value(user_entry, 'title'),
-                                'location': get_attr_value(user_entry, 'l'),
-                                'department': get_attr_value(user_entry, 'department'),
-                                'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date': reactivation_date.strftime('%d/%m/%Y')
-                            })
-                except (ValueError, TypeError):
-                    continue # Ignora entradas de agendamento malformadas
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+        specific_filter = category_filters.get(category)
+        if not specific_filter:
+            return jsonify({'error': 'Categoria inválida'}), 404
 
-        elif category == 'pending_deactivations':
-            schedules = load_disable_schedules()
-            today = date.today()
-            limit_date = today + timedelta(days=7)
+        search_filter = f"(&{base_filter}{specific_filter})"
 
-            for username, date_str in schedules.items():
-                try:
-                    deactivation_date = date.fromisoformat(date_str)
-                    if today <= deactivation_date < limit_date:
-                        user_entry = get_user_by_samaccountname(conn, username, attributes)
-                        if user_entry:
-                            items.append({
-                                'cn': get_attr_value(user_entry, 'cn'),
-                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                                'title': get_attr_value(user_entry, 'title'),
-                                'location': get_attr_value(user_entry, 'l'),
-                                'department': get_attr_value(user_entry, 'department'),
-                                'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date': deactivation_date.strftime('%d/%m/%Y')
-                            })
-                except (ValueError, TypeError):
-                    continue
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+        attributes = ['cn', 'sAMAccountName', 'title', 'l']
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
 
-        else:
-            base_filter = "(&(objectClass=user)(objectCategory=person))"
+        # O paged_cookie é enviado pelo frontend (como string base64) para buscar a próxima página
+        b64_cookie_str = request.args.get('cookie')
+        paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
-            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-            epoch_start = datetime(1601, 1, 1, tzinfo=timezone.utc)
-            delta = seven_days_ago - epoch_start
-            filetime_timestamp = int(delta.total_seconds() * 10_000_000)
+        conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
 
-            category_filters = {
-                'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
-                'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
-                'locked_users': f'(lockoutTime>={filetime_timestamp})',
+        # Acesso seguro aos atributos usando a função auxiliar
+        items = [
+            {
+                'cn': get_attr_value(e, 'cn'),
+                'sam': get_attr_value(e, 'sAMAccountName'),
+                'title': get_attr_value(e, 'title'),
+                'location': get_attr_value(e, 'l')
             }
+            for e in conn.entries
+        ]
 
-            specific_filter = category_filters.get(category)
-            if not specific_filter:
-                return jsonify({'error': 'Categoria inválida'}), 404
+        # Acesso seguro ao cookie de paginação (que é binário)
+        paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
+        cookie_bytes = paged_results_control.get('value', {}).get('cookie')
 
-            search_filter = f"(&{base_filter}{specific_filter})"
-            per_page = 20
-            b64_cookie_str = request.args.get('cookie')
-            paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
-
-            conn.search(search_base, search_filter, attributes=attributes, paged_size=per_page, paged_cookie=paged_cookie)
-
-            items = [
-                {
-                    'cn': get_attr_value(e, 'cn'),
-                    'sam': get_attr_value(e, 'sAMAccountName'),
-                    'title': get_attr_value(e, 'title'),
-                    'location': get_attr_value(e, 'l'),
-                    'department': get_attr_value(e, 'department'),
-                    'company': get_attr_value(e, 'company')
-                }
-                for e in conn.entries
-            ]
-
-            paged_results_control = conn.result.get('controls', {}).get('1.2.840.113556.1.4.319', {})
-            cookie_bytes = paged_results_control.get('value', {}).get('cookie')
-            next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
+        # Codifica o cookie binário para uma string base64 para transporte seguro em JSON
+        next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
         return jsonify({
             'items': items,
@@ -1681,21 +1627,6 @@ def get_pending_reactivations(days=7):
         try:
             reactivation_date = date.fromisoformat(date_str)
             if today <= reactivation_date < limit_date:
-                count += 1
-        except (ValueError, TypeError):
-            continue
-    return count
-
-def get_pending_deactivations(days=7):
-    """Conta o número de desativações agendadas para os próximos X dias."""
-    schedules = load_disable_schedules()
-    count = 0
-    today = date.today()
-    limit_date = today + timedelta(days=days)
-    for username, date_str in schedules.items():
-        try:
-            deactivation_date = date.fromisoformat(date_str)
-            if today <= deactivation_date < limit_date:
                 count += 1
         except (ValueError, TypeError):
             continue
