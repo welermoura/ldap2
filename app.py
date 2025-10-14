@@ -602,7 +602,8 @@ def login():
             flash('Login realizado com sucesso!', 'success')
             return redirect(url_for('dashboard'))
         except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
-            flash('Usuário ou senha incorretos.', 'error')
+            flash('Login ou senha inválidos.', 'error')
+            # Não há necessidade de logar um erro para credenciais inválidas, pois é uma falha comum.
         except Exception as e:
             flash('Erro de conexão com o servidor. Por favor, contate o administrador.', 'error')
             logging.error(f"Erro de login para usuário '{form.username.data}': {e}", exc_info=True)
@@ -786,6 +787,9 @@ def result():
 @app.route('/manage_users', methods=['GET', 'POST'])
 @require_auth
 def manage_users():
+    if not check_permission(action='can_edit'):
+        flash('Você não tem permissão para acessar esta página.', 'error')
+        return redirect(url_for('dashboard'))
     form = UserSearchForm()
     users = []
     if form.validate_on_submit():
@@ -1683,7 +1687,6 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
-                        'can_view_users': f'{group}_can_view_users' in request.form,
                         'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     views = {
@@ -1846,20 +1849,14 @@ def export_ad_data():
             flash("Base de busca do AD não configurada.", "error")
             return redirect(url_for('dashboard'))
 
+        # ✅ FILTRO CORRIGIDO: só exporta usuários reais com sAMAccountName definido
         search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
 
-        # Cabeçalho e atributos exatamente como solicitado pelo usuário
-        header = [
-            'Descrição', 'Email', 'Nome', 'Cargo', 'Sobrenome', 'Empresa', 'Escritório',
-            'Departamento', 'Nome de Logon Anterior ao Windows 2000', 'Nome de Logon do Usuário', 'Nome para Exibição'
-        ]
-        attributes = [
-            'description', 'mail', 'givenName', 'title', 'sn', 'company', 'physicalDeliveryOfficeName',
-            'department', 'sAMAccountName', 'userPrincipalName', 'displayName'
-        ]
+        header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
+        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
 
         output = io.StringIO()
-        output.write('\ufeff')
+        output.write('\ufeff')  # BOM para Excel UTF-8
         writer = csv.writer(output, quoting=csv.QUOTE_ALL)
         writer.writerow(header)
 
@@ -1873,26 +1870,49 @@ def export_ad_data():
 
         for entry in entry_generator:
             attrs = entry.get('attributes', {})
-            if not attrs.get('sAMAccountName'):
+            sam = attrs.get('sAMAccountName')
+            # ✅ Pula entradas sem login (não são usuários reais)
+            if not sam:
                 continue
 
+            # Função auxiliar para obter valor com fallback seguro
             def safe_get(attr_name, default=''):
                 val = attrs.get(attr_name)
                 return str(val) if val is not None else default
 
+            # Status da conta
+            uac_val = attrs.get('userAccountControl')
+            try:
+                uac = int(uac_val) if uac_val else 0
+                status = "Desativado" if uac & 2 else "Ativo"
+            except (ValueError, TypeError):
+                status = "Desconhecido"
+
+            # Formatação de datas
+            def format_ad_date(ft_value):
+                if not ft_value:
+                    return "Nunca"
+                try:
+                    dt = filetime_to_datetime(ft_value)
+                    return dt.strftime('%d/%m/%Y %H:%M:%S') if dt else "Nunca"
+                except Exception:
+                    return "Data Inválida"
+
             row = [
-                safe_get('description'),
-                safe_get('mail'),
-                safe_get('givenName'),
-                safe_get('title'),
-                safe_get('sn'),
-                safe_get('company'),
-                safe_get('physicalDeliveryOfficeName'),
-                safe_get('department'),
-                safe_get('sAMAccountName'),
-                safe_get('userPrincipalName'),
                 safe_get('displayName'),
+                sam,
+                safe_get('department'),
+                safe_get('title'),
+                safe_get('mail'),
+                safe_get('telephoneNumber'),
+                safe_get('mobile'),
+                safe_get('physicalDeliveryOfficeName'),
+                safe_get('description'),
+                status,
+                format_ad_date(attrs.get('whenCreated')),
+                format_ad_date(attrs.get('lastLogonTimestamp'))
             ]
+
             writer.writerow(row)
 
         output.seek(0)
