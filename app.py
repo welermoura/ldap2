@@ -28,7 +28,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(data_dir, exist_ok=True)
-os.chmod(data_dir, 0o777) # Garante que o diretório de dados seja gravável
+os.chmod(data_dir, 0o750) # Permissões mais restritivas
 os.makedirs(logs_dir, exist_ok=True)
 
 log_path = os.path.join(logs_dir, 'ad_creator.log')
@@ -414,8 +414,7 @@ def get_user_by_samaccountname(conn, sam_account_name, attributes=None):
         attributes = ldap3.ALL_ATTRIBUTES
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-    safe_sam = escape_filter_chars(sam_account_name)
-    conn.search(search_base, f'(sAMAccountName={safe_sam})', attributes=attributes)
+    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=attributes)
     if conn.entries:
         return conn.entries[0]
     return None
@@ -468,8 +467,7 @@ def search_general_users(conn, query):
     try:
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-        safe_query = escape_filter_chars(query)
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{safe_query}*)(sAMAccountName=*{safe_query}*)))"
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{query.replace('*', '')}*)(sAMAccountName=*{query.replace('*', '')}*)))"
         # Adicionando 'name' e 'mail' para corrigir a busca de usuários.
         attributes_to_get = ['displayName', 'name', 'mail', 'sAMAccountName', 'title', 'l', 'userAccountControl', 'distinguishedName']
         conn.search(search_base, search_filter, SUBTREE, attributes=attributes_to_get)
@@ -598,8 +596,8 @@ def login():
         except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
             flash('Login ou senha inválidos.', 'error')
         except Exception as e:
-            logging.error(f"Erro de login para usuário '{form.username.data}': {e}", exc_info=True)
             flash('Erro de conexão com o servidor. Por favor, contate o administrador.', 'error')
+            logging.error(f"Erro de login para usuário '{form.username.data}': {e}", exc_info=True)
 
     return render_template('login.html', form=form, sso_enabled=sso_enabled)
 
@@ -655,8 +653,8 @@ def sso_login():
         return redirect(url_for('dashboard'))
 
     except Exception as e:
+        flash(f"Ocorreu um erro durante o processo de SSO: {e}", 'error')
         logging.error(f"Erro de SSO para o usuário '{username}': {e}", exc_info=True)
-        flash("Ocorreu um erro durante o processo de SSO. Por favor, contate o administrador.", 'error')
         return redirect(url_for('login'))
 
 @app.route('/logout')
@@ -702,8 +700,7 @@ def dashboard():
             context['expiring_passwords'] = get_expiring_passwords(conn, days=5)
 
     except Exception as e:
-        logging.error(f"Erro ao carregar dados do dashboard: {e}", exc_info=True)
-        flash("Erro ao carregar dados do dashboard. Contate o administrador.", "error")
+        flash(f"Erro ao carregar dados do dashboard: {e}", "error")
 
     return render_template('dashboard.html', **context)
 
@@ -732,8 +729,7 @@ def create_user_form():
             session['found_users_sams'] = [u.sAMAccountName.value for u in users]
             return redirect(url_for('select_model'))
         except Exception as e:
-            logging.error(f"Erro ao buscar modelo: {e}", exc_info=True)
-            flash("Ocorreu um erro ao buscar o modelo de usuário. Por favor, contate o administrador.", 'error')
+            flash(f"Erro ao buscar modelo: {e}", 'error')
     return render_template('create_user_form.html', form=form)
 
 @app.route('/select_model', methods=['GET', 'POST'])
@@ -751,8 +747,7 @@ def select_model():
             if user_entry:
                 users.append({'name': user_entry.name.value, 'sam_account': user_entry.sAMAccountName.value, 'office': str(user_entry.physicalDeliveryOfficeName.value) if 'physicalDeliveryOfficeName' in user_entry and user_entry.physicalDeliveryOfficeName.value else 'N/A', 'ou_path': get_ou_path(user_entry.entry_dn)})
     except Exception as e:
-        logging.error(f"Erro ao carregar lista de modelos: {e}", exc_info=True)
-        flash("Erro ao carregar lista de modelos. Por favor, contate o administrador.", 'error')
+        flash(f"Erro ao carregar lista de modelos: {e}", 'error')
         return redirect(url_for('index'))
     form = FlaskForm()
     if request.method == 'POST':
@@ -771,8 +766,7 @@ def select_model():
             else:
                 flash(result['message'], 'error')
         except Exception as e:
-            logging.error(f"Erro fatal ao criar usuário: {e}", exc_info=True)
-            flash("Ocorreu um erro fatal ao criar o usuário. Por favor, contate o administrador.", 'error')
+            flash(f"Erro fatal ao criar usuário: {e}", 'error')
             return redirect(url_for('index'))
     return render_template('select_model.html', users=users, form_data=form_data, form=form)
 
@@ -794,8 +788,7 @@ def manage_users():
             conn = get_read_connection() # Alterado para usar a conexão de leitura
             users = search_general_users(conn, form.search_query.data.strip())
         except Exception as e:
-            logging.error(f"Erro ao conectar ou buscar usuários: {e}", exc_info=True)
-            flash("Ocorreu um erro ao buscar usuários. Por favor, contate o administrador.", "error")
+            flash(f"Erro ao conectar ou buscar usuários: {e}", "error")
     return render_template('manage_users.html', form=form, users=users)
 
 @app.route('/group_management', methods=['GET', 'POST'])
@@ -810,15 +803,14 @@ def group_management():
             config = load_config()
             search_base = config.get('AD_SEARCH_BASE')
             query = form.search_query.data
-            safe_query = escape_filter_chars(query)
-            search_filter = f"(&(objectClass=group)(cn=*{safe_query}*))"
+            search_filter = f"(&(objectClass=group)(cn=*{query}*))"
             conn.search(search_base, search_filter, attributes=['cn', 'description', 'member'])
             groups = conn.entries
             if not groups:
                 flash(f"Nenhum grupo encontrado com o nome '{query}'.", "info")
         except Exception as e:
+            flash(f"Erro ao buscar grupos: {e}", "error")
             logging.error(f"Erro ao buscar grupos com a query '{form.search_query.data}': {e}", exc_info=True)
-            flash("Ocorreu um erro ao buscar grupos. Por favor, contate o administrador.", "error")
 
     return render_template('manage_groups.html', form=form, groups=groups)
 
@@ -1070,8 +1062,8 @@ def view_group(group_name):
             return redirect(url_for('group_management'))
         return render_template('view_group.html', group=group, form=form)
     except Exception as e:
+        flash(f"Erro ao carregar a página do grupo: {e}", "error")
         logging.error(f"Erro ao carregar a view do grupo '{group_name}': {e}", exc_info=True)
-        flash("Ocorreu um erro ao carregar a página do grupo. Por favor, contate o administrador.", "error")
         return redirect(url_for('group_management'))
 
 @app.route('/api/user_groups/<username>')
@@ -1135,8 +1127,8 @@ def add_member(group_name):
         else:
             flash("Usuário ou grupo não encontrado.", 'error')
     except Exception as e:
+        flash(f"Erro ao adicionar usuário ao grupo: {e}", "error")
         logging.error(f"Erro ao adicionar usuário '{user_sam}' ao grupo '{group_name}': {e}", exc_info=True)
-        flash("Ocorreu um erro ao adicionar o usuário ao grupo.", "error")
 
     return redirect(url_for('view_group', group_name=group_name))
 
@@ -1159,8 +1151,8 @@ def remove_member(group_name, user_sam):
         else:
             flash("Usuário ou grupo não encontrado.", 'error')
     except Exception as e:
+        flash(f"Erro ao remover usuário do grupo: {e}", "error")
         logging.error(f"Erro ao remover usuário '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
-        flash("Ocorreu um erro ao remover o usuário do grupo.", "error")
 
     return redirect(url_for('view_group', group_name=group_name))
 
@@ -1204,8 +1196,8 @@ def add_member_temp(group_name):
             flash("Usuário ou grupo não encontrado.", 'error')
 
     except Exception as e:
+        flash(f"Erro na adição temporária: {e}", 'error')
         logging.error(f"Erro ao adicionar temporariamente o usuário '{request.form.get('user_sam')}' ao grupo '{group_name}': {e}", exc_info=True)
-        flash("Ocorreu um erro na adição temporária.", 'error')
 
     return redirect(url_for('view_group', group_name=group_name))
 
@@ -1247,8 +1239,8 @@ def remove_member_temp(group_name, user_sam):
             flash("Usuário ou grupo não encontrado.", 'error')
 
     except Exception as e:
+        flash(f"Erro na remoção temporária: {e}", 'error')
         logging.error(f"Erro ao remover temporariamente o usuário '{user_sam}' do grupo '{group_name}': {e}", exc_info=True)
-        flash("Ocorreu um erro na remoção temporária.", 'error')
 
     return redirect(url_for('view_group', group_name=group_name))
 
@@ -1289,8 +1281,8 @@ def view_user(username):
         delete_form = DeleteUserForm() # Para o modal de exclusão
         return render_template('view_user.html', user=user, form=form, delete_form=delete_form, password_expiry_info=password_expiry_info)
     except Exception as e:
+        flash(f"Erro ao buscar detalhes do usuário: {e}", "error")
         logging.error(f"Erro ao buscar detalhes do usuário para {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao buscar os detalhes do usuário.", "error")
         return redirect(url_for('manage_users'))
 
 @app.route('/toggle_status/<username>', methods=['POST'])
@@ -1318,8 +1310,8 @@ def toggle_status(username):
         logging.info(f"Conta '{username}' foi {action_message} por '{session.get('user_display_name', session.get('ad_user'))}'.")
         flash(f"Conta do usuário foi {action_message} com sucesso.", "success")
     except Exception as e:
+        flash(f"Erro ao alterar status da conta: {e}", "error")
         logging.error(f"Erro em toggle_status para {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao alterar o status da conta.", "error")
     return redirect(url_for('view_user', username=username))
 
 @app.route('/disable_user_temp/<username>', methods=['POST'])
@@ -1350,8 +1342,8 @@ def disable_user_temp(username):
         logging.info(f"Conta de '{username}' desativada por {days} dias por '{session.get('ad_user')}'. Reativação agendada para {reactivation_date}.")
         flash(f"Conta do usuário desativada com sucesso. A reativação está agendada para {reactivation_date}.", "success")
     except Exception as e:
+        flash(f"Erro ao desativar conta temporariamente: {e}", "error")
         logging.error(f"Erro em disable_user_temp para {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao desativar a conta temporariamente.", "error")
     return redirect(url_for('view_user', username=username))
 
 @app.route('/schedule_absence/<username>', methods=['POST'])
@@ -1389,8 +1381,8 @@ def schedule_absence(username):
     except ValueError:
         flash("Formato de data inválido.", "error")
     except Exception as e:
+        flash(f"Ocorreu um erro ao agendar a ausência: {e}", "error")
         logging.error(f"Erro em schedule_absence para {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao agendar a ausência.", "error")
 
     return redirect(url_for('view_user', username=username))
 
@@ -1425,8 +1417,8 @@ def delete_user(username):
                 flash("A confirmação do cargo ou login falhou. A exclusão foi cancelada.", "error")
 
         except Exception as e:
+            flash(f"Erro ao excluir usuário: {e}", "error")
             logging.error(f"Erro em delete_user para {username}: {e}", exc_info=True)
-            flash("Ocorreu um erro ao excluir o usuário.", "error")
     else:
         # Se a validação do formulário falhar (ex: CSRF inválido), exibe uma mensagem de erro.
         flash("Erro de validação do formulário. A exclusão foi cancelada.", "danger")
@@ -1455,8 +1447,8 @@ def reset_password(username):
         logging.info(f"A senha para '{username}' foi resetada por '{session.get('ad_user')}'.")
         flash(f"Senha do usuário resetada com sucesso. A nova senha temporária é: {default_password}", "success")
     except Exception as e:
+        flash(f"Erro ao resetar a senha: {e}", "error")
         logging.error(f"Erro em reset_password para {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao resetar a senha.", "error")
     return redirect(url_for('view_user', username=username))
 
 @app.route('/edit_user/<username>', methods=['GET', 'POST'])
@@ -1536,8 +1528,8 @@ def edit_user(username):
 
         return render_template('edit_user.html', form=form, username=username, user_name=get_attr_value(user, 'displayName'), editable_fields=editable_fields)
     except Exception as e:
+        flash(f"Ocorreu um erro: {e}", "error")
         logging.error(f"Erro ao editar o usuário {username}: {e}", exc_info=True)
-        flash("Ocorreu um erro ao editar o usuário.", "error")
         return redirect(url_for('manage_users'))
 
 # ==============================================================================
@@ -1673,8 +1665,7 @@ def admin_logs():
     except FileNotFoundError:
         flash("Arquivo de log não encontrado.", "warning")
     except Exception as e:
-        logging.error(f"Erro ao ler o arquivo de log: {e}", exc_info=True)
-        flash("Ocorreu um erro ao ler o arquivo de log.", "error")
+        flash(f"Erro ao ler o arquivo de log: {e}", "error")
 
     return render_template('admin/logs.html', logs=log_content, search_form=search_form)
 
@@ -1760,8 +1751,8 @@ def permissions():
         )
 
     except Exception as e:
+        flash(f"Erro ao carregar a página de permissões: {e}", "error")
         logging.error(f"Erro em /admin/permissions: {e}", exc_info=True)
-        flash("Ocorreu um erro ao carregar a página de permissões.", "error")
         return redirect(url_for('admin_dashboard'))
 
 # ==============================================================================
@@ -1961,7 +1952,7 @@ def export_ad_data():
 
     except Exception as e:
         logging.error(f"Erro na exportação de dados: {e}", exc_info=True)
-        flash("Ocorreu um erro ao gerar a exportação. Por favor, contate o administrador.", "error")
+        flash("Erro ao gerar exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
