@@ -579,31 +579,22 @@ def login():
                 return redirect(url_for('login'))
 
             user_groups = [g.split(',')[0].split('=')[1] for g in user_object.memberOf.values] if 'memberOf' in user_object and user_object.memberOf.value else []
-
             access_level = get_user_access_level(user_groups)
 
-            # Se o usuário não tiver nenhum grupo com permissão configurada, nega o acesso.
-            # O nível 'none' é permitido, pois redireciona para o catálogo.
-            if access_level not in ['full', 'custom', 'none']:
-                 flash('Você não tem permissão para acessar o sistema.', 'error')
-                 return redirect(url_for('login'))
+            if access_level == 'none':
+                flash('Você não tem permissão para acessar o sistema.', 'error')
+                return redirect(url_for('login'))
 
-            # Armazena tudo na sessão primeiro
             session['ad_user'] = user_object.entry_dn
             session['user_display_name'] = get_attr_value(user_object, 'displayName') or get_attr_value(user_object, 'sAMAccountName')
             session['user_groups'] = user_groups
             session['access_level'] = access_level
             session['sso_login'] = False
 
-            if access_level == 'none':
-                flash('Bem-vindo ao Catálogo de Endereços!', 'info')
-                return redirect(url_for('address_book'))
-
             flash('Login realizado com sucesso!', 'success')
             return redirect(url_for('dashboard'))
         except ldap3.core.exceptions.LDAPInvalidCredentialsResult:
             flash('Login ou senha inválidos.', 'error')
-            # Não há necessidade de logar um erro para credenciais inválidas, pois é uma falha comum.
         except Exception as e:
             flash('Erro de conexão com o servidor. Por favor, contate o administrador.', 'error')
             logging.error(f"Erro de login para usuário '{form.username.data}': {e}", exc_info=True)
@@ -1926,37 +1917,6 @@ def export_ad_data():
         logging.error(f"Erro na exportação de dados: {e}", exc_info=True)
         flash("Erro ao gerar exportação. Verifique os logs.", "error")
         return redirect(url_for('dashboard'))
-
-@app.route('/catalogo')
-@require_auth
-def address_book():
-    users = []
-    try:
-        conn = get_read_connection()
-        search_base = load_config().get('AD_SEARCH_BASE')
-        # Filtro para buscar apenas usuários que tenham todos os campos essenciais preenchidos
-        search_filter = "(&(objectClass=user)(objectCategory=person)(displayName=*)(title=*)(department=*)(telephoneNumber=*)(mail=*)(company=*)(l=*))"
-        attributes_to_fetch = ['displayName', 'title', 'department', 'telephoneNumber', 'mail', 'company', 'l', 'sAMAccountName']
-
-        entry_generator = conn.extend.standard.paged_search(
-            search_base=search_base,
-            search_filter=search_filter,
-            attributes=attributes_to_fetch,
-            paged_size=1000,
-            generator=True
-        )
-
-        # Usar entry.entry_attributes_as_dict para obter um dicionário direto
-        users_from_ad = [entry.entry_attributes_as_dict for entry in entry_generator]
-
-        # Ordenar os resultados pelo nome de exibição
-        users = sorted(users_from_ad, key=lambda u: u.get('displayName', [''])[0].lower())
-
-    except Exception as e:
-        flash("Ocorreu um erro ao carregar o catálogo de endereços. Por favor, contate o administrador.", "error")
-        logging.error(f"Erro ao carregar o catálogo de endereços: {e}", exc_info=True)
-
-    return render_template('catalogo.html', users=users)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

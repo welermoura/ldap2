@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Monitoramento do Ambiente{% endblock %}
+{% block title %}Dashboard - Gerenciamento de Colaboradores{% endblock %}
 
 {% block page_title %}
 <div class="page-header">
-    <h1><i class="fas fa-chart-line me-2"></i>Monitoramento do Ambiente</h1>
+    <h1><i class="fas fa-chart-line me-2"></i>Gerenciamento de Colaboradores</h1>
     <div>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">
             <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', 'Usuário') }})
