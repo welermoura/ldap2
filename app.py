@@ -943,6 +943,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
+            # Ordena pela data agendada, convertendo a string de volta para um objeto de data
             items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
 
         elif category == 'pending_deactivations':
@@ -967,6 +968,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
+            # Ordena pela data agendada, convertendo a string de volta para um objeto de data
             items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
 
         elif category in ['active_users', 'disabled_users']:
@@ -1501,10 +1503,21 @@ def edit_user(username):
                         changes[attr_name] = [(ldap3.MODIFY_REPLACE, [submitted_value or ''])]
 
             if changes:
+                changes_to_log = []
+                for field_name in editable_fields:
+                    if field_name in field_to_attr:
+                        attr_name = field_to_attr[field_name]
+                        submitted_value = getattr(form, field_name).data
+                        original_value = get_attr_value(user, attr_name)
+                        if submitted_value != original_value:
+                            changes_to_log.append(f"{attr_name}: De '{original_value}' Para '{submitted_value}'")
+
                 service_conn.modify(user.distinguishedName.value, changes)
                 if service_conn.result['description'] == 'success':
                     flash('Usuário atualizado com sucesso!', 'success')
-                    logging.info(f"Usuário '{username}' atualizado por '{session.get('ad_user')}'. Campos alterados: {list(changes.keys())}")
+                    log_details = "; ".join(changes_to_log)
+                    log_message = f"Usuário '{username}' atualizado por '{session.get('user_display_name', session.get('ad_user'))}'. Detalhes: {log_details}"
+                    logging.info(log_message)
                 else:
                     flash(f"Erro ao atualizar usuário: {service_conn.result['message']}", 'error')
             else:
