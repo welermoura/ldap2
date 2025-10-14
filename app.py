@@ -943,7 +943,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+            items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
 
         elif category == 'pending_deactivations':
             schedules = load_disable_schedules()
@@ -967,7 +967,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+            items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
 
         elif category in ['active_users', 'disabled_users']:
             base_filter = "(&(objectClass=user)(objectCategory=person))"
