@@ -181,12 +181,6 @@ footer {
     box-shadow: 0 0 0 0.25rem rgba(40, 167, 69, 0.15) !important;
 }
 
-/* Corrige o ícone do seletor de data para temas escuros em navegadores WebKit */
-input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: invert(1);
-}
-
-
 /* ==========================================================================
    Alerts & Flashes
    ========================================================================== */
@@ -281,11 +275,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .btn-success { background-color: #28a745 !important; border-color: #28a745 !important; }
 .btn-danger { background-color: #dc3545 !important; border-color: #dc3545 !important; }
 .btn-info { background-color: #0dcaf0 !important; border-color: #0dcaf0 !important; }
-
-/* Corrige a cor de ícones dentro de botões específicos para garantir a visibilidade */
-.btn-info .fas {
-    color: #fff !important;
-}
 
 /* ==========================================================================
    General & Helper Classes
