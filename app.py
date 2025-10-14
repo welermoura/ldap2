@@ -414,7 +414,8 @@ def get_user_by_samaccountname(conn, sam_account_name, attributes=None):
         attributes = ldap3.ALL_ATTRIBUTES
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=attributes)
+    safe_sam = escape_filter_chars(sam_account_name)
+    conn.search(search_base, f'(sAMAccountName={safe_sam})', attributes=attributes)
     if conn.entries:
         return conn.entries[0]
     return None
@@ -467,7 +468,8 @@ def search_general_users(conn, query):
     try:
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{query.replace('*', '')}*)(sAMAccountName=*{query.replace('*', '')}*)))"
+        safe_query = escape_filter_chars(query)
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{safe_query}*)(sAMAccountName=*{safe_query}*)))"
         # Adicionando 'name' e 'mail' para corrigir a busca de usuários.
         attributes_to_get = ['displayName', 'name', 'mail', 'sAMAccountName', 'title', 'l', 'userAccountControl', 'distinguishedName']
         conn.search(search_base, search_filter, SUBTREE, attributes=attributes_to_get)
@@ -803,7 +805,8 @@ def group_management():
             config = load_config()
             search_base = config.get('AD_SEARCH_BASE')
             query = form.search_query.data
-            search_filter = f"(&(objectClass=group)(cn=*{query}*))"
+            safe_query = escape_filter_chars(query)
+            search_filter = f"(&(objectClass=group)(cn=*{safe_query}*))"
             conn.search(search_base, search_filter, attributes=['cn', 'description', 'member'])
             groups = conn.entries
             if not groups:
