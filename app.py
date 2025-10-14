@@ -944,48 +944,66 @@ def api_dashboard_list(category):
             today = date.today()
             limit_date = today + timedelta(days=7)
 
+            temp_items = []
             for username, date_str in schedules.items():
                 try:
                     reactivation_date = date.fromisoformat(date_str)
                     if today <= reactivation_date < limit_date:
                         user_entry = get_user_by_samaccountname(conn, username, attributes)
                         if user_entry:
-                            items.append({
+                            temp_items.append({
                                 'cn': get_attr_value(user_entry, 'cn'),
                                 'sam': get_attr_value(user_entry, 'sAMAccountName'),
                                 'title': get_attr_value(user_entry, 'title'),
                                 'location': get_attr_value(user_entry, 'l'),
                                 'department': get_attr_value(user_entry, 'department'),
                                 'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date': reactivation_date.strftime('%d/%m/%Y')
+                                'scheduled_date_obj': reactivation_date
                             })
                 except (ValueError, TypeError):
                     continue
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+
+            # Sort by the date object first
+            sorted_items = sorted(temp_items, key=lambda x: x['scheduled_date_obj'])
+
+            # Now, create the final list with the formatted date string for the frontend
+            for item in sorted_items:
+                item['scheduled_date'] = item['scheduled_date_obj'].strftime('%d/%m/%Y')
+                del item['scheduled_date_obj'] # Clean up the temporary key
+                items.append(item)
 
         elif category == 'pending_deactivations':
             schedules = load_disable_schedules()
             today = date.today()
             limit_date = today + timedelta(days=7)
 
+            temp_items = []
             for username, date_str in schedules.items():
                 try:
                     deactivation_date = date.fromisoformat(date_str)
                     if today <= deactivation_date < limit_date:
                         user_entry = get_user_by_samaccountname(conn, username, attributes)
                         if user_entry:
-                            items.append({
+                            temp_items.append({
                                 'cn': get_attr_value(user_entry, 'cn'),
                                 'sam': get_attr_value(user_entry, 'sAMAccountName'),
                                 'title': get_attr_value(user_entry, 'title'),
                                 'location': get_attr_value(user_entry, 'l'),
                                 'department': get_attr_value(user_entry, 'department'),
                                 'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date': deactivation_date.strftime('%d/%m/%Y')
+                                'scheduled_date_obj': deactivation_date
                             })
                 except (ValueError, TypeError):
                     continue
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+
+            # Sort by the date object first
+            sorted_items = sorted(temp_items, key=lambda x: x['scheduled_date_obj'])
+
+            # Now, create the final list with the formatted date string for the frontend
+            for item in sorted_items:
+                item['scheduled_date'] = item['scheduled_date_obj'].strftime('%d/%m/%Y')
+                del item['scheduled_date_obj'] # Clean up the temporary key
+                items.append(item)
 
         elif category in ['active_users', 'disabled_users']:
             base_filter = "(&(objectClass=user)(objectCategory=person))"
