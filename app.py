@@ -1913,11 +1913,19 @@ def export_ad_data():
             flash("Base de busca do AD não configurada.", "error")
             return redirect(url_for('dashboard'))
 
-        # ✅ FILTRO CORRIGIDO: só exporta usuários reais com sAMAccountName definido
+        # Filtro para exportar apenas usuários reais com sAMAccountName definido
         search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
 
-        header = ['Nome Completo', 'Login', 'Departamento', 'Cargo', 'Email', 'Telefone', 'Celular', 'Escritório', 'Descrição', 'Status da Conta', 'Data de Criação', 'Último Logon']
-        attributes = ['displayName', 'sAMAccountName', 'department', 'title', 'mail', 'telephoneNumber', 'mobile', 'physicalDeliveryOfficeName', 'description', 'userAccountControl', 'whenCreated', 'lastLogonTimestamp']
+        # Cabeçalhos e atributos conforme solicitado pelo usuário
+        header = [
+            'Descrição', 'Email', 'Nome', 'Cargo', 'Sobrenome', 'Empresa', 'Escritório',
+            'Departamento', 'Nome de Logon Anterior ao Windows 2000', 'Nome de Logon do Usuário',
+            'Nome para Exibição'
+        ]
+        attributes = [
+            'description', 'mail', 'givenName', 'title', 'sn', 'company', 'physicalDeliveryOfficeName',
+            'department', 'sAMAccountName', 'userPrincipalName', 'displayName'
+        ]
 
         output = io.StringIO()
         output.write('\ufeff')  # BOM para Excel UTF-8
@@ -1934,9 +1942,8 @@ def export_ad_data():
 
         for entry in entry_generator:
             attrs = entry.get('attributes', {})
-            sam = attrs.get('sAMAccountName')
-            # ✅ Pula entradas sem login (não são usuários reais)
-            if not sam:
+            # Pula entradas que não são de usuários (sem sAMAccountName)
+            if not attrs.get('sAMAccountName'):
                 continue
 
             # Função auxiliar para obter valor com fallback seguro
@@ -1944,37 +1951,19 @@ def export_ad_data():
                 val = attrs.get(attr_name)
                 return str(val) if val is not None else default
 
-            # Status da conta
-            uac_val = attrs.get('userAccountControl')
-            try:
-                uac = int(uac_val) if uac_val else 0
-                status = "Desativado" if uac & 2 else "Ativo"
-            except (ValueError, TypeError):
-                status = "Desconhecido"
-
-            # Formatação de datas
-            def format_ad_date(ft_value):
-                if not ft_value:
-                    return "Nunca"
-                try:
-                    dt = filetime_to_datetime(ft_value)
-                    return dt.strftime('%d/%m/%Y %H:%M:%S') if dt else "Nunca"
-                except Exception:
-                    return "Data Inválida"
-
+            # Construção da linha na ordem correta
             row = [
-                safe_get('displayName'),
-                sam,
-                safe_get('department'),
-                safe_get('title'),
-                safe_get('mail'),
-                safe_get('telephoneNumber'),
-                safe_get('mobile'),
-                safe_get('physicalDeliveryOfficeName'),
                 safe_get('description'),
-                status,
-                format_ad_date(attrs.get('whenCreated')),
-                format_ad_date(attrs.get('lastLogonTimestamp'))
+                safe_get('mail'),
+                safe_get('givenName'),
+                safe_get('title'),
+                safe_get('sn'),
+                safe_get('company'),
+                safe_get('physicalDeliveryOfficeName'),
+                safe_get('department'),
+                safe_get('sAMAccountName'),
+                safe_get('userPrincipalName'),
+                safe_get('displayName')
             ]
 
             writer.writerow(row)
