@@ -28,7 +28,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(data_dir, exist_ok=True)
-os.chmod(data_dir, 0o750) # Permissões mais restritivas
+os.chmod(data_dir, 0o775) # Permissões mais restritivas
 os.makedirs(logs_dir, exist_ok=True)
 
 log_path = os.path.join(logs_dir, 'ad_creator.log')
