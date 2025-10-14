@@ -87,7 +87,9 @@
                     <li class="nav-item" role="presentation"><button class="nav-link" id="endereco-tab" data-bs-toggle="tab" data-bs-target="#endereco" type="button" role="tab">Endereço</button></li>
                     <li class="nav-item" role="presentation"><button class="nav-link" id="telefones-tab" data-bs-toggle="tab" data-bs-target="#telefones" type="button" role="tab">Telefones</button></li>
                     <li class="nav-item" role="presentation"><button class="nav-link" id="organizacao-tab" data-bs-toggle="tab" data-bs-target="#organizacao" type="button" role="tab">Organização</button></li>
+                    {% if check_permission(action='can_manage_groups') %}
                     <li class="nav-item" role="presentation"><button class="nav-link" id="memberof-tab" data-bs-toggle="tab" data-bs-target="#memberof" type="button" role="tab">Membro de</button></li>
+                    {% endif %}
                 </ul>
             </div>
             <div class="card-body">
@@ -129,6 +131,7 @@
                             <tr><td><strong>Empresa:</strong></td><td>{{ get_attr_value(user, 'company') }}</td></tr>
                         </table>
                     </div>
+                    {% if check_permission(action='can_manage_groups') %}
                     <div class="tab-pane fade" id="memberof" role="tabpanel" aria-labelledby="memberof-tab">
                         <div class="d-flex justify-content-end mb-2">
                             <input type="text" id="group-membership-search" class="form-control form-control-sm w-50" placeholder="Filtrar grupos...">
@@ -136,6 +139,7 @@
                         <div id="memberof-list-container" class="table-responsive" style="min-height: 150px;">
                             </div>
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
