@@ -28,7 +28,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(data_dir, exist_ok=True)
-os.chmod(data_dir, 0o775) # Permissões mais restritivas
+os.chmod(data_dir, 0o750) # Permissões mais restritivas
 os.makedirs(logs_dir, exist_ok=True)
 
 log_path = os.path.join(logs_dir, 'ad_creator.log')
@@ -293,6 +293,23 @@ def filetime_to_datetime(ft):
         return None
     return datetime.fromtimestamp((int(ft) - EPOCH_AS_FILETIME) / HUNDREDS_OF_NANOSECONDS, tz=timezone.utc)
 
+def format_phone_number(phone_str):
+    """Formata um número de telefone para o padrão XX XXXX-XXXX."""
+    if not phone_str:
+        return ""
+
+    digits = re.sub(r'\D', '', phone_str)
+
+    # Se tiver mais de 10 dígitos, considera apenas os últimos 10 para o formato fixo.
+    if len(digits) > 10:
+        digits = digits[-10:]
+
+    if len(digits) == 10:
+        return f"{digits[0:2]} {digits[2:6]}-{digits[6:10]}"
+    else:
+        # Se não tiver 10 dígitos, retorna o número com os dígitos que tem
+        return phone_str
+
 # ==============================================================================
 # Modelos de Formulário (Forms)
 # ==============================================================================
@@ -523,8 +540,9 @@ def create_ad_user(conn, form_data, model_attrs):
     for attr in model_attributes_to_copy:
         if attr in model_attrs and model_attrs[attr]: user_attributes[attr] = str(model_attrs[attr])
     if form_data.get('telephone'):
-        user_attributes['telephoneNumber'] = form_data['telephone']
-        user_attributes['homePhone'] = form_data['telephone']
+        formatted_phone = format_phone_number(form_data['telephone'])
+        user_attributes['telephoneNumber'] = formatted_phone
+        user_attributes['homePhone'] = formatted_phone
 
     try:
         user_dn = f"CN={display_name},{ou_dn}"
@@ -943,8 +961,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
-            # Ordena pela data agendada, convertendo a string de volta para um objeto de data
-            items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
 
         elif category == 'pending_deactivations':
             schedules = load_disable_schedules()
@@ -968,8 +985,7 @@ def api_dashboard_list(category):
                             })
                 except (ValueError, TypeError):
                     continue
-            # Ordena pela data agendada, convertendo a string de volta para um objeto de data
-            items = sorted(items, key=lambda x: datetime.strptime(x['scheduled_date'], '%d/%m/%Y'))
+            items = sorted(items, key=lambda x: x.get('cn', '').lower())
 
         elif category in ['active_users', 'disabled_users']:
             base_filter = "(&(objectClass=user)(objectCategory=person))"
@@ -1496,6 +1512,11 @@ def edit_user(username):
                 if field_name in field_to_attr:
                     attr_name = field_to_attr[field_name]
                     submitted_value = getattr(form, field_name).data
+
+                    # Formata o número de telefone se for um campo de telefone
+                    if attr_name in ['telephoneNumber', 'homePhone', 'pager', 'mobile', 'facsimileTelephoneNumber']:
+                        submitted_value = format_phone_number(submitted_value)
+
                     original_value = get_attr_value(user, attr_name)
 
                     # Apenas adiciona a alteração se o valor realmente mudou.
@@ -1508,6 +1529,8 @@ def edit_user(username):
                     if field_name in field_to_attr:
                         attr_name = field_to_attr[field_name]
                         submitted_value = getattr(form, field_name).data
+                        if attr_name in ['telephoneNumber', 'homePhone', 'pager', 'mobile', 'facsimileTelephoneNumber']:
+                            submitted_value = format_phone_number(submitted_value)
                         original_value = get_attr_value(user, attr_name)
                         if submitted_value != original_value:
                             changes_to_log.append(f"{attr_name}: De '{original_value}' Para '{submitted_value}'")
