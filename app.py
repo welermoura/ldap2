@@ -1071,6 +1071,43 @@ def view_group(group_name):
         logging.error(f"Erro ao carregar a view do grupo '{group_name}': {e}", exc_info=True)
         return redirect(url_for('group_management'))
 
+@app.route('/api/user_groups/<username>')
+@require_auth
+def api_user_groups(username):
+    """
+    API endpoint to get the list of groups a user is a member of.
+    """
+    try:
+        conn = get_read_connection()
+        user = get_user_by_samaccountname(conn, username, attributes=['memberOf'])
+
+        if not user:
+            return jsonify([]) # Retorna lista vazia se o usuário não for encontrado
+
+        group_dns = user.memberOf.values if 'memberOf' in user and user.memberOf.values else []
+        if not group_dns:
+            return jsonify([])
+
+        groups_details = []
+        # Para cada DN de grupo, busca seus detalhes
+        for dn in group_dns:
+            # Usamos uma busca base no DN do grupo para pegar seus atributos
+            conn.search(dn, '(objectClass=group)', BASE, attributes=['cn', 'description'])
+            if conn.entries:
+                group_entry = conn.entries[0]
+                groups_details.append({
+                    'cn': get_attr_value(group_entry, 'cn'),
+                    'description': get_attr_value(group_entry, 'description')
+                })
+
+        # Ordena os grupos pelo nome (cn)
+        sorted_groups = sorted(groups_details, key=lambda g: g.get('cn', '').lower())
+
+        return jsonify(sorted_groups)
+    except Exception as e:
+        logging.error(f"Erro na API de grupos do usuário '{username}': {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/add_member/<group_name>', methods=['POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
