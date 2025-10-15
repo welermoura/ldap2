@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Painel de Administração - Gestão AD{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-cogs me-2"></i>Painel de Administração</h1>
+    <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-sign-out-alt me-2"></i>Sair do Admin ({{ session.get('master_admin') }})
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <a href="{{ url_for('config') }}" class="card glass-card text-decoration-none h-100 dashboard-card">
+            <div class="card-body text-center">
+                <i class="fas fa-server fa-3x mb-3"></i>
+                <h5 class="card-title">Configurações Gerais</h5>
+                <p class="card-text text-muted">Configurar servidor AD, domínio, conta de serviço e outras opções.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 mb-4">
+        <a href="{{ url_for('permissions') }}" class="card glass-card text-decoration-none h-100 dashboard-card">
+            <div class="card-body text-center">
+                <i class="fas fa-user-shield fa-3x mb-3"></i>
+                <h5 class="card-title">Permissões de Grupo</h5>
+                <p class="card-text text-muted">Definir quais ações os grupos de operadores podem acessar.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 mb-4">
+        <a href="{{ url_for('admin_logs') }}" class="card glass-card text-decoration-none h-100 dashboard-card">
+            <div class="card-body text-center">
+                <i class="fas fa-clipboard-list fa-3x mb-3"></i>
+                <h5 class="card-title">Visualizar Logs</h5>
+                <p class="card-text text-muted">Ver os logs de atividade da aplicação para auditoria.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 mb-4">
+        <a href="{{ url_for('admin_change_password') }}" class="card glass-card text-decoration-none h-100 dashboard-card">
+            <div class="card-body text-center">
+                <i class="fas fa-key fa-3x mb-3"></i>
+                <h5 class="card-title">Alterar Senha do Admin</h5>
+                <p class="card-text text-muted">Altere a senha de acesso a este painel de administração.</p>
+            </div>
+        </a>
+    </div>
+</div>
+{% endblock %}
