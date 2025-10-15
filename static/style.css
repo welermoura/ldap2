@@ -172,3 +172,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: var(--datepicker
 #theme-toggle.theme-icon-sun i { color: #f1c40f; }
 
 .btn-quick-action { min-width: 220px; text-align: center; }
+
+/* Adicionado para o novo cabeçalho */
+.navbar {
+    z-index: 1030; /* Garante que o cabeçalho fique acima de outros elementos */
+}
