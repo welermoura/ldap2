@@ -283,8 +283,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 modalCurrentPage = responseData.page ? responseData.page + 1 : modalCurrentPage;
 
                 // Mostra ou esconde o botão "Carregar Mais"
-                const stillHasMore = modalNextCookie || (modalTotalPages && modalCurrentPage <= modalTotalPages);
-                loadMoreBtn.style.display = stillHasMore ? 'block' : 'none';
+                const hasMoreByCookie = modalNextCookie !== null;
+                const hasMoreByPages = responseData.total_pages && responseData.page < responseData.total_pages;
+                loadMoreBtn.style.display = (hasMoreByCookie || hasMoreByPages) ? 'block' : 'none';
 
             } catch (error) {
                 loadMoreBtn.style.display = 'none';
