@@ -27,9 +27,9 @@ html[data-theme='light'] {
     --primary-hover-color: #0b5ed7;
     --secondary-color: #6c757d;
     --secondary-hover-color: #5c636a;
-    --background-color: #f8f9fa;
-    --glass-background: #ffffff;
-    --glass-border-color: #dee2e6;
+    --background-color: #f0f2f5; /* Fundo off-white */
+    --glass-background: #ffffff; /* Painéis brancos */
+    --glass-border-color: #d0d7de; /* Bordas mais visíveis */
     --text-color: #111111; /* Aumentado contraste */
     --text-muted-color: #555555; /* Aumentado contraste */
     --input-background: #ffffff;
