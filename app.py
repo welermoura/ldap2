@@ -1312,10 +1312,27 @@ def view_user(username):
             elif int(expiry_time_ft) == 9223372036854775807 or int(expiry_time_ft) == 0:
                  password_expiry_info = "A senha está configurada para nunca expirar."
 
+        # Verifica se há um agendamento de ausência
+        disable_schedules = load_disable_schedules()
+        reactivation_schedules = load_schedules()
+        absence_schedule = None
+        if username in disable_schedules and username in reactivation_schedules:
+            try:
+                deactivation_date = datetime.fromisoformat(disable_schedules[username]).strftime('%d/%m/%Y')
+                reactivation_date = datetime.fromisoformat(reactivation_schedules[username]).strftime('%d/%m/%Y')
+                absence_schedule = {
+                    'deactivation_date': deactivation_date,
+                    'reactivation_date': reactivation_date
+                }
+            except ValueError:
+                # Trata caso a data no JSON esteja mal formatada
+                logging.error(f"Data de agendamento mal formatada para o usuário {username}.")
+
+
         # Passa ambos os formulários para o template
         form = EditUserForm() # Para os formulários existentes
         delete_form = DeleteUserForm() # Para o modal de exclusão
-        return render_template('view_user.html', user=user, form=form, delete_form=delete_form, password_expiry_info=password_expiry_info)
+        return render_template('view_user.html', user=user, form=form, delete_form=delete_form, password_expiry_info=password_expiry_info, absence_schedule=absence_schedule)
     except Exception as e:
         flash(f"Erro ao buscar detalhes do usuário: {e}", "error")
         logging.error(f"Erro ao buscar detalhes do usuário para {username}: {e}", exc_info=True)
@@ -1419,6 +1436,33 @@ def schedule_absence(username):
     except Exception as e:
         flash(f"Ocorreu um erro ao agendar a ausência: {e}", "error")
         logging.error(f"Erro em schedule_absence para {username}: {e}", exc_info=True)
+
+    return redirect(url_for('view_user', username=username))
+
+@app.route('/cancel_absence/<username>', methods=['POST'])
+@require_auth
+@require_permission(action='can_disable')
+def cancel_absence(username):
+    try:
+        # Carrega ambos os arquivos de agendamento
+        disable_schedules = load_disable_schedules()
+        reactivation_schedules = load_schedules()
+
+        # Remove o usuário de ambos os agendamentos se ele existir
+        if username in disable_schedules:
+            del disable_schedules[username]
+            save_disable_schedules(disable_schedules)
+
+        if username in reactivation_schedules:
+            del reactivation_schedules[username]
+            save_schedules(reactivation_schedules)
+
+        flash(f"O agendamento de ausência para '{username}' foi cancelado com sucesso.", "success")
+        logging.info(f"Agendamento de ausência para '{username}' cancelado por '{session.get('user_display_name')}'.")
+
+    except Exception as e:
+        flash(f"Ocorreu um erro ao cancelar o agendamento: {e}", "error")
+        logging.error(f"Erro em cancel_absence para {username}: {e}", exc_info=True)
 
     return redirect(url_for('view_user', username=username))
 

@@ -37,9 +37,21 @@
                                 <button type="submit" class="btn btn-success w-100"><i class="fas fa-check-circle me-2"></i>Reativar Conta</button>
                             </form>
                         {% elif status == 'Ativo' %}
-                            <button type="button" class="btn btn-info w-100" data-bs-toggle="modal" data-bs-target="#scheduleAbsenceModal">
-                                <i class="fas fa-calendar-alt me-2"></i>Agendar Ausência
-                            </button>
+                            {% if absence_schedule %}
+                                <div class="alert alert-info text-center">
+                                    <p class="mb-2"><strong>Ausência Agendada</strong></p>
+                                    <p class="mb-1 small">Início: {{ absence_schedule.deactivation_date }}</p>
+                                    <p class="mb-2 small">Fim: {{ absence_schedule.reactivation_date }}</p>
+                                    <form action="{{ url_for('cancel_absence', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST" onsubmit="return confirm('Tem certeza que deseja cancelar este agendamento de ausência?');">
+                                        {{ form.csrf_token }}
+                                        <button type="submit" class="btn btn-warning btn-sm w-100"><i class="fas fa-times-circle me-2"></i>Cancelar Agendamento</button>
+                                    </form>
+                                </div>
+                            {% else %}
+                                <button type="button" class="btn btn-info w-100" data-bs-toggle="modal" data-bs-target="#scheduleAbsenceModal">
+                                    <i class="fas fa-calendar-alt me-2"></i>Agendar Ausência
+                                </button>
+                            {% endif %}
                             <form action="{{ url_for('toggle_status', username=get_attr_value(user, 'sAMAccountName')) }}" method="POST" onsubmit="return confirm('Tem certeza que deseja desativar esta conta permanentemente?');">
                                 {{ form.csrf_token }}
                                 <button type="submit" class="btn btn-danger w-100"><i class="fas fa-ban me-2"></i>Desativar Permanente</button>
