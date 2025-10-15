@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Glassmorphism Theme - Base Styles & Variables
+   Theme Variables - Dark and Light
    ========================================================================== */
-:root {
+:root, html[data-theme='dark'] {
     --primary-color: #28a745;
     --primary-hover-color: #218838;
     --secondary-color: #6c757d;
@@ -14,19 +14,47 @@
     --input-background: rgba(0, 0, 0, 0.25);
     --input-border-color: rgba(255, 255, 255, 0.3);
     --box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-    --text-highlight-color: #ffffff; /* For important text like expiry info */
+    --text-highlight-color: #ffffff;
+    --body-text-color: #ffffff;
+    --link-color: var(--primary-color);
+    --link-hover-color: var(--primary-hover-color);
+    --modal-backdrop-bg: rgba(10, 20, 20, 0.6);
+    --datepicker-filter: invert(1);
 }
+
+html[data-theme='light'] {
+    --primary-color: #0d6efd;
+    --primary-hover-color: #0b5ed7;
+    --secondary-color: #6c757d;
+    --secondary-hover-color: #5c636a;
+    --background-color: #f8f9fa;
+    --glass-background: #ffffff;
+    --glass-border-color: #dee2e6;
+    --text-color: #212529;
+    --text-muted-color: #6c757d;
+    --input-background: #ffffff;
+    --input-border-color: #ced4da;
+    --box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    --text-highlight-color: #000000;
+    --body-text-color: #212529;
+    --link-color: var(--primary-color);
+    --link-hover-color: var(--primary-hover-color);
+    --modal-backdrop-bg: rgba(0, 0, 0, 0.5);
+    --datepicker-filter: none;
+}
+
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     margin: 0;
     background-color: var(--background-color);
-    background-image: linear-gradient(135deg, var(--background-color) 0%, #2a4b46 100%);
-    color: #ffffff !important; /* Força a cor da fonte a ser branca globalmente */
+    background-image: none; /* Removido para simplificar a troca de tema */
+    color: var(--body-text-color) !important;
     line-height: 1.6;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    transition: background-color 0.3s, color 0.3s;
 }
 
 .container, .container-fluid {
@@ -75,11 +103,11 @@ footer {
     vertical-align: middle;
 }
 .table.glass-table a {
-    color: var(--primary-color);
+    color: var(--link-color);
     text-decoration: none;
 }
 .table.glass-table a:hover {
-    color: var(--primary-hover-color);
+    color: var(--link-hover-color);
     text-decoration: underline;
 }
 
@@ -135,7 +163,7 @@ footer {
     transition: color 0.3s;
 }
 .admin-link:hover {
-    color: #fff;
+    color: var(--text-highlight-color);
 }
 .login-help {
     font-size: 0.85em;
@@ -183,7 +211,7 @@ footer {
 
 /* Fix for date picker icon color in dark mode */
 input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: invert(1);
+    filter: var(--datepicker-filter);
 }
 
 /* ==========================================================================
@@ -220,7 +248,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
    ========================================================================== */
 .modal-backdrop {
     z-index: 1050;
-    background-color: rgba(10, 20, 20, 0.6);
+    background-color: var(--modal-backdrop-bg);
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
 }
@@ -244,8 +272,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .modal .modal-title, .modal .modal-body, .modal .text-muted {
     color: var(--text-color);
 }
-.modal .btn-close-white {
-    filter: invert(1) grayscale(100%) brightness(200%);
+.modal .btn-close {
+    filter: var(--datepicker-filter);
 }
 
 /* ==========================================================================
@@ -345,4 +373,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .page-indicator {
     color: var(--text-color);
+}
+
+#theme-toggle i {
+    color: var(--text-color);
+    transition: color 0.3s;
 }
