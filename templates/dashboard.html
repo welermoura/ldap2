@@ -2,15 +2,10 @@
 
 {% block title %}Dashboard - Gerenciamento de Colaboradores{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
 {% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-chart-line me-2"></i>Gerenciamento de Colaboradores</h1>
-    <div>
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">
-            <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', 'Usuário') }})
-        </a>
-    </div>
-</div>
+    {{ render_page_header('<i class="fas fa-users-cog me-2"></i>Gerenciamento de Colaboradores', show_home_button=False, show_back_button=False) }}
 {% endblock %}
 
 {% block content %}
