@@ -14,23 +14,13 @@
 </head>
 <body>
 
+    <button id="theme-toggle" class="btn btn-outline-secondary" style="position: fixed; top: 1rem; right: 1rem; z-index: 1031; width: 40px; height: 40px; border-radius: 50%;">
+        <i class="fas fa-moon"></i>
+    </button>
+
     {% block body_content %}
         <main class="container-fluid">
-            <div class="page-header">
-                <h1>{% block page_title %}<i class="fas fa-shield-alt"></i> Portal de Gestão AD{% endblock %}</h1>
-                <div class="d-flex align-items-center">
-                    {% block page_actions %}
-                        {% if 'ad_user' in session or 'master_admin' in session %}
-                        <a href="{{ url_for('logout') if 'ad_user' in session else url_for('admin_logout') }}" class="btn btn-outline-secondary">
-                            <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', session.get('master_admin', 'Usuário')) }})
-                        </a>
-                        {% endif %}
-                    {% endblock %}
-                    <button id="theme-toggle" class="btn btn-outline-secondary ms-2">
-                        <i class="fas fa-moon"></i>
-                    </button>
-                </div>
-            </div>
+            {% block page_title %}{% endblock %}
 
             {# Flashed messages will now appear here with the correct styling #}
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -89,39 +79,31 @@
     // Lógica para o seletor de tema
     (function() {
         const docElement = document.documentElement;
+        const themeToggle = document.getElementById('theme-toggle');
+        if (!themeToggle) return;
 
-        // Função para aplicar o tema no <html> e no ícone do botão (se existir)
+        const themeToggleIcon = themeToggle.querySelector('i');
+
         const applyTheme = (theme) => {
             docElement.setAttribute('data-theme', theme);
             localStorage.setItem('theme', theme);
-
-            const themeToggle = document.getElementById('theme-toggle');
-            if (themeToggle) {
-                const themeToggleIcon = themeToggle.querySelector('i');
-                if (theme === 'light') {
-                    themeToggleIcon.className = 'fas fa-moon';
-                    themeToggle.classList.remove('theme-icon-sun');
-                } else {
-                    themeToggleIcon.className = 'fa-regular fa-sun';
-                    themeToggle.classList.add('theme-icon-sun');
-                }
+            if (theme === 'light') {
+                themeToggleIcon.className = 'fas fa-moon';
+                themeToggle.classList.remove('theme-icon-sun');
+            } else {
+                themeToggleIcon.className = 'fa-regular fa-sun';
+                themeToggle.classList.add('theme-icon-sun');
             }
         };
 
-        // Função para alternar o tema quando o botão é clicado
         const toggleTheme = () => {
             const currentTheme = docElement.getAttribute('data-theme') || 'light';
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
             applyTheme(newTheme);
         };
 
-        // Adiciona o listener apenas se o botão existir
-        const themeToggle = document.getElementById('theme-toggle');
-        if (themeToggle) {
-            themeToggle.addEventListener('click', toggleTheme);
-        }
+        themeToggle.addEventListener('click', toggleTheme);
 
-        // Aplica o tema na carga inicial em todas as páginas
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
