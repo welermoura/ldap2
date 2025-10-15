@@ -14,6 +14,10 @@
 </head>
 <body>
 
+    <button id="theme-toggle" class="btn btn-outline-secondary" style="position: fixed; top: 1rem; right: 1rem; z-index: 1031;">
+        <i class="fas fa-sun"></i>
+    </button>
+
     {% block body_content %}
         <main class="container-fluid">
             {% block page_title %}{% endblock %}
@@ -69,6 +73,47 @@
             e.target.value = formattedValue;
         }
     });
+    </script>
+
+    <script>
+    // Lógica para o seletor de tema
+    (function() {
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeToggleIcon = themeToggle.querySelector('i');
+        const docElement = document.documentElement;
+
+        const applyTheme = (theme) => {
+            docElement.setAttribute('data-theme', theme);
+            if (theme === 'light') {
+                themeToggleIcon.classList.remove('fa-sun');
+                themeToggleIcon.classList.add('fa-moon');
+            } else {
+                themeToggleIcon.classList.remove('fa-moon');
+                themeToggleIcon.classList.add('fa-sun');
+            }
+        };
+
+        const toggleTheme = () => {
+            const currentTheme = docElement.getAttribute('data-theme') || 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('theme', newTheme);
+            applyTheme(newTheme);
+        };
+
+        themeToggle.addEventListener('click', toggleTheme);
+
+        // Aplica o tema na carga inicial
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        if (savedTheme) {
+            applyTheme(savedTheme);
+        } else if (prefersDark) {
+            applyTheme('dark');
+        } else {
+            applyTheme('light'); // Default para claro se nada for especificado
+        }
+    })();
     </script>
 
     {% block scripts %}{% endblock %}
