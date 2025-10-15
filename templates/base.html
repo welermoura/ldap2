@@ -16,7 +16,21 @@
 
     {% block body_content %}
         <main class="container-fluid">
-            {% block page_title %}{% endblock %}
+            <div class="page-header">
+                <h1>{% block page_title %}<i class="fas fa-shield-alt"></i> Portal de Gestão AD{% endblock %}</h1>
+                <div class="d-flex align-items-center">
+                    {% block page_actions %}
+                        {% if 'ad_user' in session or 'master_admin' in session %}
+                        <a href="{{ url_for('logout') if 'ad_user' in session else url_for('admin_logout') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-sign-out-alt me-2"></i>Sair ({{ session.get('user_display_name', session.get('master_admin', 'Usuário')) }})
+                        </a>
+                        {% endif %}
+                    {% endblock %}
+                    <button id="theme-toggle" class="btn btn-outline-secondary ms-2">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+            </div>
 
             {# Flashed messages will now appear here with the correct styling #}
             {% with messages = get_flashed_messages(with_categories=true) %}
