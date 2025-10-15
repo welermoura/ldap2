@@ -8,6 +8,7 @@ __pycache__/
 config.json
 user.json
 schedules.json
+disable_schedules.json
 group_schedules.json
 permissions.json
 secret.key
