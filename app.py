@@ -431,7 +431,9 @@ def get_user_by_samaccountname(conn, sam_account_name, attributes=None):
         attributes = ldap3.ALL_ATTRIBUTES
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=attributes)
+    # Garante que apenas usuários com UPN sejam retornados
+    search_filter = f'(&(sAMAccountName={escape_filter_chars(sam_account_name)})(userPrincipalName=*))'
+    conn.search(search_base, search_filter, attributes=attributes)
     if conn.entries:
         return conn.entries[0]
     return None
@@ -484,7 +486,8 @@ def search_general_users(conn, query):
     try:
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{query.replace('*', '')}*)(sAMAccountName=*{query.replace('*', '')}*)))"
+        safe_query = escape_filter_chars(query)
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(userPrincipalName=*)(|(displayName=*{safe_query}*)(sAMAccountName=*{safe_query}*)))"
         # Adicionando 'name' e 'mail' para corrigir a busca de usuários.
         attributes_to_get = ['displayName', 'name', 'mail', 'sAMAccountName', 'title', 'l', 'userAccountControl', 'distinguishedName']
         conn.search(search_base, search_filter, SUBTREE, attributes=attributes_to_get)
@@ -1006,7 +1009,7 @@ def api_dashboard_list(category):
                 items.append(item)
 
         elif category in ['active_users', 'disabled_users']:
-            base_filter = "(&(objectClass=user)(objectCategory=person))"
+            base_filter = "(&(objectClass=user)(objectCategory=person)(userPrincipalName=*))"
             category_filters = {
                 'active_users': '(!(userAccountControl:1.2.840.113556.1.4.803:=2))',
                 'disabled_users': '(userAccountControl:1.2.840.113556.1.4.803:=2)',
@@ -1820,7 +1823,7 @@ def get_dashboard_stats(conn):
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return stats
     try:
-        user_filter = '(&(objectClass=user)(objectCategory=person))'
+        user_filter = '(&(objectClass=user)(objectCategory=person)(userPrincipalName=*))'
         entry_generator = conn.extend.standard.paged_search(search_base, user_filter, attributes=['userAccountControl'], paged_size=500)
         user_count = 0
         for entry in entry_generator:
@@ -1891,7 +1894,7 @@ def get_expiring_passwords(conn, days=15):
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
     try:
-        search_filter = "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
+        search_filter = "(&(objectClass=user)(objectCategory=person)(userPrincipalName=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
         attributes = ['cn', 'sAMAccountName', 'msDS-UserPasswordExpiryTimeComputed', 'title', 'department', 'l']
         entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=attributes, paged_size=1000)
         now_utc = datetime.now(timezone.utc)
@@ -1931,8 +1934,8 @@ def export_ad_data():
             flash("Base de busca do AD não configurada.", "error")
             return redirect(url_for('dashboard'))
 
-        # Filtro para exportar apenas usuários reais com sAMAccountName definido
-        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
+        # Filtro para exportar apenas usuários reais com sAMAccountName e userPrincipalName definidos
+        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*)(userPrincipalName=*))"
 
         # Cabeçalhos e atributos conforme solicitado pelo usuário
         header = [
