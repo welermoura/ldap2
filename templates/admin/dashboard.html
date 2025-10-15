@@ -2,14 +2,7 @@
 
 {% block title %}Painel de Administração - Gestão AD{% endblock %}
 
-{% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-cogs me-2"></i>Painel de Administração</h1>
-    <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-secondary">
-        <i class="fas fa-sign-out-alt me-2"></i>Sair do Admin ({{ session.get('master_admin') }})
-    </a>
-</div>
-{% endblock %}
+{% block page_title %}<i class="fas fa-cogs me-2"></i>Painel de Administração{% endblock %}
 
 {% block content %}
 <div class="row">
