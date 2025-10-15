@@ -431,9 +431,7 @@ def get_user_by_samaccountname(conn, sam_account_name, attributes=None):
         attributes = ldap3.ALL_ATTRIBUTES
     config = load_config()
     search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-    # Garante que apenas usuários com UPN sejam retornados
-    search_filter = f'(&(sAMAccountName={escape_filter_chars(sam_account_name)})(userPrincipalName=*))'
-    conn.search(search_base, search_filter, attributes=attributes)
+    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=attributes)
     if conn.entries:
         return conn.entries[0]
     return None
@@ -486,8 +484,7 @@ def search_general_users(conn, query):
     try:
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE', conn.server.info.other['defaultNamingContext'][0])
-        safe_query = escape_filter_chars(query)
-        search_filter = f"(&(objectClass=user)(objectCategory=person)(userPrincipalName=*)(|(displayName=*{safe_query}*)(sAMAccountName=*{safe_query}*)))"
+        search_filter = f"(&(objectClass=user)(objectCategory=person)(|(displayName=*{query.replace('*', '')}*)(sAMAccountName=*{query.replace('*', '')}*)))"
         # Adicionando 'name' e 'mail' para corrigir a busca de usuários.
         attributes_to_get = ['displayName', 'name', 'mail', 'sAMAccountName', 'title', 'l', 'userAccountControl', 'distinguishedName']
         conn.search(search_base, search_filter, SUBTREE, attributes=attributes_to_get)
@@ -890,6 +887,52 @@ def api_group_members(group_name):
         logging.error(f"Erro na API de membros do grupo '{group_name}': {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+def get_paginated_user_details(conn, search_base, sam_account_names, page, per_page, attributes):
+    """
+    Busca detalhes de usuários no AD de forma paginada a partir de uma lista de sAMAccountNames.
+    """
+    if not sam_account_names:
+        return [], 0
+
+    total_items = len(sam_account_names)
+    total_pages = (total_items + per_page - 1) // per_page
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    sams_to_fetch = sam_account_names[start:end]
+    if not sams_to_fetch:
+        return [], total_pages
+
+    # Constrói um filtro LDAP para buscar todos os usuários da página de uma só vez
+    ldap_filter = "(|"
+    for sam in sams_to_fetch:
+        ldap_filter += f"(sAMAccountName={escape_filter_chars(sam)})"
+    ldap_filter += ")"
+
+    # Adiciona o filtro para garantir que o userPrincipalName exista
+    final_filter = f"(&(userPrincipalName=*){ldap_filter})"
+
+    conn.search(search_base, final_filter, attributes=attributes)
+
+    # Mapeia os resultados para facilitar a ordenação e formatação
+    user_details_map = {get_attr_value(e, 'sAMAccountName'): e for e in conn.entries}
+
+    # Monta a lista final na mesma ordem dos sAMs da página
+    items = []
+    for sam in sams_to_fetch:
+        user_entry = user_details_map.get(sam)
+        if user_entry:
+            items.append({
+                'cn': get_attr_value(user_entry, 'cn'),
+                'sam': get_attr_value(user_entry, 'sAMAccountName'),
+                'title': get_attr_value(user_entry, 'title'),
+                'location': get_attr_value(user_entry, 'l'),
+                'department': get_attr_value(user_entry, 'department'),
+                'company': get_attr_value(user_entry, 'company')
+            })
+
+    return items, total_pages
+
 @app.route('/api/dashboard_list/<category>')
 @require_auth
 def api_dashboard_list(category):
@@ -912,8 +955,11 @@ def api_dashboard_list(category):
         config = load_config()
         search_base = config.get('AD_SEARCH_BASE')
         attributes = ['cn', 'sAMAccountName', 'title', 'l', 'department', 'company']
+
+        page = request.args.get('page', 1, type=int)
+        per_page = 20 # Itens por página
         items = []
-        next_cookie_b64 = None
+        total_pages = 0
 
         if category == 'deactivated_last_week':
             seven_days_ago = datetime.now() - timedelta(days=7)
@@ -929,84 +975,55 @@ def api_dashboard_list(category):
             except (FileNotFoundError, Exception) as e:
                 logging.error(f"Erro ao processar log para API de desativados: {e}")
 
-            for username in usernames:
-                user_entry = get_user_by_samaccountname(conn, username, attributes)
-                if user_entry:
-                    items.append({
-                        'cn': get_attr_value(user_entry, 'cn'),
-                        'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                        'title': get_attr_value(user_entry, 'title'),
-                        'location': get_attr_value(user_entry, 'l'),
-                        'department': get_attr_value(user_entry, 'department'),
-                        'company': get_attr_value(user_entry, 'company')
-                    })
-            items = sorted(items, key=lambda x: x.get('cn', '').lower())
+            sorted_usernames = sorted(list(usernames))
+            items, total_pages = get_paginated_user_details(conn, search_base, sorted_usernames, page, per_page, attributes)
 
         elif category == 'pending_reactivations':
             schedules = load_schedules()
             today = date.today()
             limit_date = today + timedelta(days=7)
 
-            temp_items = []
+            scheduled_users = []
             for username, date_str in schedules.items():
                 try:
                     reactivation_date = date.fromisoformat(date_str)
                     if today <= reactivation_date < limit_date:
-                        user_entry = get_user_by_samaccountname(conn, username, attributes)
-                        if user_entry:
-                            temp_items.append({
-                                'cn': get_attr_value(user_entry, 'cn'),
-                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                                'title': get_attr_value(user_entry, 'title'),
-                                'location': get_attr_value(user_entry, 'l'),
-                                'department': get_attr_value(user_entry, 'department'),
-                                'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date_obj': reactivation_date
-                            })
+                        scheduled_users.append({'sam': username, 'date': reactivation_date})
                 except (ValueError, TypeError):
                     continue
 
-            # Sort by the date object first
-            sorted_items = sorted(temp_items, key=lambda x: x['scheduled_date_obj'])
+            sorted_users = sorted(scheduled_users, key=lambda x: x['date'])
+            sam_names = [user['sam'] for user in sorted_users]
 
-            # Now, create the final list with the formatted date string for the frontend
-            for item in sorted_items:
-                item['scheduled_date'] = item['scheduled_date_obj'].strftime('%d/%m/%Y')
-                del item['scheduled_date_obj'] # Clean up the temporary key
-                items.append(item)
+            items, total_pages = get_paginated_user_details(conn, search_base, sam_names, page, per_page, attributes)
+
+            # Adiciona a data agendada aos itens retornados
+            user_dates = {user['sam']: user['date'].strftime('%d/%m/%Y') for user in sorted_users}
+            for item in items:
+                item['scheduled_date'] = user_dates.get(item['sam'])
 
         elif category == 'pending_deactivations':
             schedules = load_disable_schedules()
             today = date.today()
             limit_date = today + timedelta(days=7)
 
-            temp_items = []
+            scheduled_users = []
             for username, date_str in schedules.items():
                 try:
                     deactivation_date = date.fromisoformat(date_str)
                     if today <= deactivation_date < limit_date:
-                        user_entry = get_user_by_samaccountname(conn, username, attributes)
-                        if user_entry:
-                            temp_items.append({
-                                'cn': get_attr_value(user_entry, 'cn'),
-                                'sam': get_attr_value(user_entry, 'sAMAccountName'),
-                                'title': get_attr_value(user_entry, 'title'),
-                                'location': get_attr_value(user_entry, 'l'),
-                                'department': get_attr_value(user_entry, 'department'),
-                                'company': get_attr_value(user_entry, 'company'),
-                                'scheduled_date_obj': deactivation_date
-                            })
+                        scheduled_users.append({'sam': username, 'date': deactivation_date})
                 except (ValueError, TypeError):
                     continue
 
-            # Sort by the date object first
-            sorted_items = sorted(temp_items, key=lambda x: x['scheduled_date_obj'])
+            sorted_users = sorted(scheduled_users, key=lambda x: x['date'])
+            sam_names = [user['sam'] for user in sorted_users]
 
-            # Now, create the final list with the formatted date string for the frontend
-            for item in sorted_items:
-                item['scheduled_date'] = item['scheduled_date_obj'].strftime('%d/%m/%Y')
-                del item['scheduled_date_obj'] # Clean up the temporary key
-                items.append(item)
+            items, total_pages = get_paginated_user_details(conn, search_base, sam_names, page, per_page, attributes)
+
+            user_dates = {user['sam']: user['date'].strftime('%d/%m/%Y') for user in sorted_users}
+            for item in items:
+                item['scheduled_date'] = user_dates.get(item['sam'])
 
         elif category in ['active_users', 'disabled_users']:
             base_filter = "(&(objectClass=user)(objectCategory=person)(userPrincipalName=*))"
@@ -1017,7 +1034,6 @@ def api_dashboard_list(category):
             specific_filter = category_filters.get(category)
             search_filter = f"(&{base_filter}{specific_filter})"
 
-            per_page = 20
             b64_cookie_str = request.args.get('cookie')
             paged_cookie = base64.b64decode(b64_cookie_str) if b64_cookie_str else None
 
@@ -1039,12 +1055,17 @@ def api_dashboard_list(category):
             cookie_bytes = paged_results_control.get('value', {}).get('cookie')
             next_cookie_b64 = base64.b64encode(cookie_bytes).decode('utf-8') if cookie_bytes else None
 
+            return jsonify({
+                'items': items,
+                'cookie': next_cookie_b64
+            })
         else:
             return jsonify({'error': 'Categoria inválida'}), 404
 
         return jsonify({
             'items': items,
-            'cookie': next_cookie_b64
+            'page': page,
+            'total_pages': total_pages
         })
 
     except ldap3.core.exceptions.LDAPInvalidFilterError as e:
@@ -1823,7 +1844,7 @@ def get_dashboard_stats(conn):
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return stats
     try:
-        user_filter = '(&(objectClass=user)(objectCategory=person)(userPrincipalName=*))'
+        user_filter = '(&(objectClass=user)(objectCategory=person))'
         entry_generator = conn.extend.standard.paged_search(search_base, user_filter, attributes=['userAccountControl'], paged_size=500)
         user_count = 0
         for entry in entry_generator:
@@ -1894,7 +1915,7 @@ def get_expiring_passwords(conn, days=15):
     search_base = config.get('AD_SEARCH_BASE')
     if not search_base: return expiring_users
     try:
-        search_filter = "(&(objectClass=user)(objectCategory=person)(userPrincipalName=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
+        search_filter = "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=65536)))"
         attributes = ['cn', 'sAMAccountName', 'msDS-UserPasswordExpiryTimeComputed', 'title', 'department', 'l']
         entry_generator = conn.extend.standard.paged_search(search_base, search_filter, attributes=attributes, paged_size=1000)
         now_utc = datetime.now(timezone.utc)
@@ -1934,8 +1955,8 @@ def export_ad_data():
             flash("Base de busca do AD não configurada.", "error")
             return redirect(url_for('dashboard'))
 
-        # Filtro para exportar apenas usuários reais com sAMAccountName e userPrincipalName definidos
-        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*)(userPrincipalName=*))"
+        # Filtro para exportar apenas usuários reais com sAMAccountName definido
+        search_filter = "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
 
         # Cabeçalhos e atributos conforme solicitado pelo usuário
         header = [

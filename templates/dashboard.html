@@ -141,7 +141,7 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <input type="text" id="modalSearchInput" class="form-control mb-3" placeholder="Filtrar resultados...">
+        <input type="text" id="modalSearchInput" class="form-control mb-3" placeholder="Filtrar resultados carregados...">
         <div id="modalContent" class="list-group" style="max-height: 400px; overflow-y: auto;">
             <div class="text-center p-5">
                 <div class="spinner-border text-primary" role="status">
@@ -149,6 +149,9 @@
                 </div>
             </div>
         </div>
+      </div>
+      <div class="modal-footer">
+        <button id="loadMoreBtn" class="btn btn-primary" style="display: none;">Carregar Mais</button>
       </div>
     </div>
   </div>
@@ -162,16 +165,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const dataModal = document.getElementById('dataModal');
     if (dataModal) {
         let allModalData = [];
+        let modalCurrentPage = 1;
+        let modalTotalPages = 1;
+        let modalNextCookie = null;
+        let modalIsLoading = false;
+        let modalCurrentCategory = '';
+
         const modalContent = document.getElementById('modalContent');
         const modalTitle = document.getElementById('dataModalLabel');
         const modalSearchInput = document.getElementById('modalSearchInput');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
 
-        function renderModalList(data) {
-            modalContent.innerHTML = '';
-            if (data.length === 0) {
+        function appendToModalList(data) {
+            // Remove o spinner inicial se ele existir
+            const initialSpinner = modalContent.querySelector('.text-center.p-5');
+            if(initialSpinner) initialSpinner.remove();
+
+            if (data.length === 0 && allModalData.length === 0) {
                 modalContent.innerHTML = '<div class="list-group-item text-muted">Nenhum item encontrado.</div>';
                 return;
             }
+
             data.forEach(item => {
                 const a = document.createElement('a');
                 a.href = `/view_user/${item.sam}`;
@@ -218,39 +232,91 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        modalSearchInput.addEventListener('input', () => {
+        function filterAndRender() {
             const query = modalSearchInput.value.toLowerCase();
-            const filteredData = allModalData.filter(item =>
-                item.cn.toLowerCase().includes(query) ||
-                item.sam.toLowerCase().includes(query)
-            );
-            renderModalList(filteredData);
-        });
+            modalContent.innerHTML = ''; // Limpa a lista atual
 
-        dataModal.addEventListener('show.bs.modal', async function (event) {
-            const button = event.relatedTarget;
-            const category = button.getAttribute('data-category');
-            const title = button.getAttribute('data-title');
+            const dataToRender = query
+                ? allModalData.filter(item =>
+                    (item.cn && item.cn.toLowerCase().includes(query)) ||
+                    (item.sam && item.sam.toLowerCase().includes(query))
+                  )
+                : allModalData; // Se a busca estiver vazia, usa todos os dados carregados
 
-            modalTitle.textContent = title;
-            modalContent.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
-            modalSearchInput.value = '';
+            appendToModalList(dataToRender);
+        }
+
+        modalSearchInput.addEventListener('input', filterAndRender);
+
+        async function loadMoreModalData() {
+            const hasMoreByPages = modalTotalPages && modalCurrentPage <= modalTotalPages;
+            const hasMoreByCookie = modalNextCookie !== null;
+            if (modalIsLoading || (!hasMoreByPages && !hasMoreByCookie)) return;
+
+            modalIsLoading = true;
+            loadMoreBtn.textContent = 'Carregando...';
+            loadMoreBtn.disabled = true;
 
             try {
-                const response = await fetch(`/api/dashboard_list/${category}`);
+                let url = `/api/dashboard_list/${modalCurrentCategory}`;
+                if (modalNextCookie) {
+                    url += `?cookie=${modalNextCookie}`;
+                } else {
+                    url += `?page=${modalCurrentPage}`;
+                }
+
+                const response = await fetch(url);
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({ error: 'Falha ao carregar dados.' }));
                     throw new Error(errorData.error || 'Falha ao carregar dados.');
                 }
 
-                // Corrigido: Extrai a lista 'items' da resposta JSON
                 const responseData = await response.json();
-                allModalData = responseData.items || []; // Garante que é um array
-                renderModalList(allModalData);
+                const newItems = responseData.items || [];
+
+                allModalData.push(...newItems); // Acumula os dados
+                appendToModalList(newItems); // Adiciona os novos itens ao DOM
+
+                // Atualiza o estado da paginação
+                modalTotalPages = responseData.total_pages || modalTotalPages;
+                modalNextCookie = responseData.cookie !== undefined ? responseData.cookie : null;
+                modalCurrentPage = responseData.page ? responseData.page + 1 : modalCurrentPage;
+
+                // Mostra ou esconde o botão "Carregar Mais"
+                const stillHasMore = modalNextCookie || (modalTotalPages && modalCurrentPage <= modalTotalPages);
+                loadMoreBtn.style.display = stillHasMore ? 'block' : 'none';
 
             } catch (error) {
-                modalContent.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                loadMoreBtn.style.display = 'none';
+                if (allModalData.length === 0) {
+                    modalContent.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                }
+            } finally {
+                modalIsLoading = false;
+                loadMoreBtn.textContent = 'Carregar Mais';
+                loadMoreBtn.disabled = false;
             }
+        }
+
+        loadMoreBtn.addEventListener('click', loadMoreModalData);
+
+        dataModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            // Reseta o estado para cada vez que o modal é aberto
+            modalCurrentCategory = button.getAttribute('data-category');
+            modalTitle.textContent = button.getAttribute('data-title');
+            modalContent.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+            modalSearchInput.value = '';
+            loadMoreBtn.style.display = 'none';
+
+            allModalData = [];
+            modalCurrentPage = 1;
+            modalTotalPages = 1;
+            modalNextCookie = null;
+            modalIsLoading = false;
+
+            // Inicia o carregamento dos dados
+            loadMoreModalData();
         });
     }
 
