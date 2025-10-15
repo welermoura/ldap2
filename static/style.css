@@ -30,13 +30,13 @@ html[data-theme='light'] {
     --background-color: #f8f9fa;
     --glass-background: #ffffff;
     --glass-border-color: #dee2e6;
-    --text-color: #212529;
-    --text-muted-color: #6c757d;
+    --text-color: #111111; /* Aumentado contraste */
+    --text-muted-color: #555555; /* Aumentado contraste */
     --input-background: #ffffff;
     --input-border-color: #ced4da;
     --box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
     --text-highlight-color: #000000;
-    --body-text-color: #212529;
+    --body-text-color: #111111; /* Aumentado contraste */
     --link-color: var(--primary-color);
     --link-hover-color: var(--primary-hover-color);
     --modal-backdrop-bg: rgba(0, 0, 0, 0.5);
