@@ -379,3 +379,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     color: var(--text-color);
     transition: color 0.3s;
 }
+
+#theme-toggle.theme-icon-sun i {
+    color: #f1c40f;
+}
+
+.btn-quick-action {
+    min-width: 220px;
+    text-align: center;
+}

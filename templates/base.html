@@ -14,10 +14,6 @@
 </head>
 <body>
 
-    <button id="theme-toggle" class="btn btn-outline-secondary" style="position: fixed; top: 1rem; right: 1rem; z-index: 1031;">
-        <i class="fas fa-sun"></i>
-    </button>
-
     {% block body_content %}
         <main class="container-fluid">
             {% block page_title %}{% endblock %}
@@ -79,24 +75,26 @@
     // Lógica para o seletor de tema
     (function() {
         const themeToggle = document.getElementById('theme-toggle');
+        if (!themeToggle) return; // Sai se o botão não existir na página
+
         const themeToggleIcon = themeToggle.querySelector('i');
         const docElement = document.documentElement;
 
         const applyTheme = (theme) => {
             docElement.setAttribute('data-theme', theme);
             if (theme === 'light') {
-                themeToggleIcon.classList.remove('fa-sun');
-                themeToggleIcon.classList.add('fa-moon');
+                themeToggleIcon.className = 'fas fa-moon';
+                themeToggle.classList.remove('theme-icon-sun');
             } else {
-                themeToggleIcon.classList.remove('fa-moon');
-                themeToggleIcon.classList.add('fa-sun');
+                themeToggleIcon.className = 'fa-regular fa-sun';
+                themeToggle.classList.add('theme-icon-sun');
             }
+            localStorage.setItem('theme', theme);
         };
 
         const toggleTheme = () => {
-            const currentTheme = docElement.getAttribute('data-theme') || 'dark';
+            const currentTheme = docElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            localStorage.setItem('theme', newTheme);
             applyTheme(newTheme);
         };
 
@@ -108,10 +106,8 @@
 
         if (savedTheme) {
             applyTheme(savedTheme);
-        } else if (prefersDark) {
-            applyTheme('dark');
         } else {
-            applyTheme('light'); // Default para claro se nada for especificado
+            applyTheme(prefersDark ? 'dark' : 'light');
         }
     })();
     </script>
