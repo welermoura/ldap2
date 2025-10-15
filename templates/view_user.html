@@ -2,10 +2,11 @@
 
 {% block title %}Detalhes de {{ get_attr_value(user, 'displayName') or 'Usuário' }}{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
 {% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-user-circle me-2"></i>Detalhes de: {{ get_attr_value(user, 'displayName') or 'N/A' }}</h1>
-</div>
+    {% set title_text = '<i class="fas fa-user-circle me-2"></i>Detalhes de: ' ~ (get_attr_value(user, 'displayName') or 'N/A') %}
+    {{ render_page_header(title_text) }}
 {% endblock %}
 
 

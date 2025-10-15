@@ -3,10 +3,10 @@
 
 {% block title %}Criar Novo Usuário - Gestão AD{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
 {% block page_title %}
-    <div class="page-header">
-        <h1>Criar Novo Usuário</h1>
-    </div>
+    {{ render_page_header('<i class="fas fa-user-plus me-2"></i>Criar Novo Usuário') }}
 {% endblock %}
 
 {% block content %}
