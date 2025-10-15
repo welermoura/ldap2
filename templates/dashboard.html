@@ -277,15 +277,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 allModalData.push(...newItems); // Acumula os dados
                 appendToModalList(newItems); // Adiciona os novos itens ao DOM
 
-                // Atualiza o estado da paginação
-                modalTotalPages = responseData.total_pages || modalTotalPages;
-                modalNextCookie = responseData.cookie !== undefined ? responseData.cookie : null;
-                modalCurrentPage = responseData.page ? responseData.page + 1 : modalCurrentPage;
+                // Atualiza o estado da paginação de forma explícita para evitar conflitos
+                if (responseData.cookie !== undefined) {
+                    modalNextCookie = responseData.cookie;
+                } else {
+                    modalNextCookie = null; // Reseta o cookie se a paginação for por página
+                }
 
-                // Mostra ou esconde o botão "Carregar Mais"
-                const hasMoreByCookie = modalNextCookie !== null;
-                const hasMoreByPages = responseData.total_pages && responseData.page < responseData.total_pages;
-                loadMoreBtn.style.display = (hasMoreByCookie || hasMoreByPages) ? 'block' : 'none';
+                if (responseData.total_pages !== undefined) {
+                    modalTotalPages = responseData.total_pages;
+                    modalCurrentPage = responseData.page + 1; // Prepara para a próxima página
+                } else {
+                    // Reseta o estado de página se a paginação for por cookie
+                    modalTotalPages = 1;
+                    modalCurrentPage = 1;
+                }
+
+                // Recalcula a visibilidade do botão com base no estado atualizado
+                const hasMore = (modalNextCookie !== null) || (modalCurrentPage <= modalTotalPages && modalTotalPages > 1);
+                loadMoreBtn.style.display = hasMore ? 'block' : 'none';
 
             } catch (error) {
                 loadMoreBtn.style.display = 'none';
