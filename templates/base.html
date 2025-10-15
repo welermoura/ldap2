@@ -13,37 +13,6 @@
     {% block head %}{% endblock %}
 </head>
 <body>
-    {% if session.ad_user %}
-    <header class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('dashboard') }}"><i class="fas fa-users-cog me-2"></i>Gestão AD</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#header-nav" aria-controls="header-nav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="header-nav">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}"><i class="fas fa-home me-1"></i>Home</a></li>
-                    <li class="nav-item"><a class="nav-link" href="javascript:history.back()"><i class="fas fa-arrow-left me-1"></i>Voltar</a></li>
-                </ul>
-                <div class="d-flex align-items-center">
-                    <div class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle text-white" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-user-circle me-1"></i>{{ session.user_display_name }}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i>Sair</a></li>
-                        </ul>
-                    </div>
-                    <div class="ms-lg-3 ms-2">
-                        <button id="theme-toggle" class="btn btn-outline-secondary" style="width: 40px; height: 40px; border-radius: 50%;">
-                            <i class="fas fa-moon"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </header>
-    {% endif %}
 
     {% block body_content %}
         <main class="container-fluid">

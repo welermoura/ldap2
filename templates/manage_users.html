@@ -3,10 +3,10 @@
 
 {% block title %}Gerenciar Usuários - Gestão AD{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
 {% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-users me-2"></i>Gerenciar Usuários</h1>
-</div>
+    {{ render_page_header('<i class="fas fa-users me-2"></i>Gerenciar Usuários') }}
 {% endblock %}
 
 {% block content %}

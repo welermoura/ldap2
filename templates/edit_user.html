@@ -3,10 +3,11 @@
 
 {% block title %}Editar {{ user_name }} - Gestão AD{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
 {% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-edit me-2"></i>Editar Usuário: {{ user_name }}</h1>
-</div>
+    {% set title_text = '<i class="fas fa-edit me-2"></i>Editar Usuário: ' ~ user_name %}
+    {{ render_page_header(title_text) }}
 {% endblock %}
 
 {% block content %}
