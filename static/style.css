@@ -149,6 +149,11 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: var(--datepicker
 .btn-secondary:hover { background-color: var(--secondary-hover-color) !important; border-color: var(--secondary-hover-color) !important; }
 .btn-outline-secondary { background-color: transparent !important; border-color: var(--secondary-color) !important; color: var(--text-muted-color) !important; }
 .btn-outline-secondary:hover { background-color: var(--secondary-color) !important; color: #fff !important; }
+
+html[data-theme='light'] .btn-outline-primary,
+html[data-theme='light'] .btn-outline-secondary {
+    color: #000 !important;
+}
 .btn-success { background-color: #28a745 !important; border-color: #28a745 !important; }
 .btn-danger { background-color: #dc3545 !important; border-color: #dc3545 !important; }
 .btn-info { background-color: #0dcaf0 !important; border-color: #0dcaf0 !important; }
