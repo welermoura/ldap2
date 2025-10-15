@@ -5,6 +5,7 @@ from datetime import date
 import logging
 import ldap3
 from ldap3 import Server, Connection, ALL
+from ldap3.utils.conv import escape_filter_chars
 from cryptography.fernet import Fernet
 
 # ==============================================================================
@@ -85,11 +86,15 @@ def get_ldap_connection(config):
         return None
 
 def get_user_by_samaccountname(conn, sam_account_name, search_base):
-    conn.search(search_base, f'(sAMAccountName={sam_account_name})', attributes=['distinguishedName', 'userAccountControl'])
+    safe_sam = escape_filter_chars(sam_account_name)
+    search_filter = f'(&(sAMAccountName={safe_sam})(userPrincipalName=*))'
+    conn.search(search_base, search_filter, attributes=['distinguishedName', 'userAccountControl'])
     return conn.entries[0] if conn.entries else None
 
 def get_group_by_name(conn, group_name, search_base):
-    conn.search(search_base, f'(&(objectClass=group)(cn={group_name}))', attributes=['distinguishedName'])
+    safe_group_name = escape_filter_chars(group_name)
+    search_filter = f'(&(objectClass=group)(cn={safe_group_name}))'
+    conn.search(search_base, search_filter, attributes=['distinguishedName'])
     return conn.entries[0] if conn.entries else None
 
 # ==============================================================================
