@@ -74,33 +74,40 @@
     <script>
     // Lógica para o seletor de tema
     (function() {
-        const themeToggle = document.getElementById('theme-toggle');
-        if (!themeToggle) return; // Sai se o botão não existir na página
-
-        const themeToggleIcon = themeToggle.querySelector('i');
         const docElement = document.documentElement;
 
+        // Função para aplicar o tema no <html> e no ícone do botão (se existir)
         const applyTheme = (theme) => {
             docElement.setAttribute('data-theme', theme);
-            if (theme === 'light') {
-                themeToggleIcon.className = 'fas fa-moon';
-                themeToggle.classList.remove('theme-icon-sun');
-            } else {
-                themeToggleIcon.className = 'fa-regular fa-sun';
-                themeToggle.classList.add('theme-icon-sun');
-            }
             localStorage.setItem('theme', theme);
+
+            const themeToggle = document.getElementById('theme-toggle');
+            if (themeToggle) {
+                const themeToggleIcon = themeToggle.querySelector('i');
+                if (theme === 'light') {
+                    themeToggleIcon.className = 'fas fa-moon';
+                    themeToggle.classList.remove('theme-icon-sun');
+                } else {
+                    themeToggleIcon.className = 'fa-regular fa-sun';
+                    themeToggle.classList.add('theme-icon-sun');
+                }
+            }
         };
 
+        // Função para alternar o tema quando o botão é clicado
         const toggleTheme = () => {
-            const currentTheme = docElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            const currentTheme = docElement.getAttribute('data-theme') || 'light';
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
             applyTheme(newTheme);
         };
 
-        themeToggle.addEventListener('click', toggleTheme);
+        // Adiciona o listener apenas se o botão existir
+        const themeToggle = document.getElementById('theme-toggle');
+        if (themeToggle) {
+            themeToggle.addEventListener('click', toggleTheme);
+        }
 
-        // Aplica o tema na carga inicial
+        // Aplica o tema na carga inicial em todas as páginas
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
