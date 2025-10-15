@@ -27,16 +27,16 @@ html[data-theme='light'] {
     --primary-hover-color: #0b5ed7;
     --secondary-color: #6c757d;
     --secondary-hover-color: #5c636a;
-    --background-color: #f0f2f5; /* Fundo off-white */
-    --glass-background: #ffffff; /* Painéis brancos */
-    --glass-border-color: #d0d7de; /* Bordas mais visíveis */
-    --text-color: #111111; /* Aumentado contraste */
-    --text-muted-color: #555555; /* Aumentado contraste */
-    --input-background: #ffffff;
-    --input-border-color: #ced4da;
+    --background-color: #d3d3d3; /* Fundo cinza claro */
+    --glass-background: #c9c9c9; /* Painéis cinza mais escuro */
+    --glass-border-color: #b0b0b0; /* Bordas mais visíveis ainda */
+    --text-color: #000000; /* Fonte preta para máximo contraste */
+    --text-muted-color: #333333; /* Cinza escuro para texto silenciado */
+    --input-background: #c9c9c9; /* Usa a mesma cor dos painéis */
+    --input-border-color: #b0b0b0; /* Usa a mesma cor das bordas dos painéis */
     --box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
     --text-highlight-color: #000000;
-    --body-text-color: #111111; /* Aumentado contraste */
+    --body-text-color: #000000; /* Fonte preta para máximo contraste */
     --link-color: var(--primary-color);
     --link-hover-color: var(--primary-hover-color);
     --modal-backdrop-bg: rgba(0, 0, 0, 0.5);
