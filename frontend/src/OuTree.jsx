@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Tree from 'rc-tree';
 import { useDrop } from 'react-dnd';
 import 'rc-tree/assets/index.css';
@@ -9,15 +9,39 @@ const ItemTypes = {
 };
 
 // Componente customizado para o título do nó, que atuará como alvo de soltura
-const TreeNodeTitle = ({ nodeData, onMoveUser }) => {
+const TreeNodeTitle = ({ nodeData, onMoveUser, onHoverExpand }) => {
+  const timerRef = useRef(null);
+
   const [{ isOver, canDrop }, drop] = useDrop(() => ({
     accept: ItemTypes.USER,
-    drop: (item) => onMoveUser(item, nodeData), // Função chamada ao soltar
+    drop: (item) => onMoveUser(item, nodeData),
+    hover: (item, monitor) => {
+      // Se o mouse está sobre o nó e ele não está expandido
+      if (monitor.isOver({ shallow: true })) {
+        // Inicia o temporizador se ele não estiver rodando
+        if (!timerRef.current) {
+          timerRef.current = setTimeout(() => {
+            onHoverExpand(nodeData);
+            timerRef.current = null;
+          }, 700); // Atraso de 700ms para expandir
+        }
+      }
+    },
     collect: (monitor) => ({
-      isOver: !!monitor.isOver(),
+      isOver: !!monitor.isOver({ shallow: true }),
       canDrop: !!monitor.canDrop(),
     }),
   }));
+
+  // Limpa o temporizador se o mouse sair do nó
+  useEffect(() => {
+    if (!isOver && timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOver]);
+
 
   return (
     <div ref={drop} style={{
@@ -36,6 +60,7 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
   const [treeData, setTreeData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [expandedKeys, setExpandedKeys] = useState([]);
 
   useEffect(() => {
     fetch('/api/ou_tree')
@@ -62,6 +87,13 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
     }
   };
 
+  const handleHoverExpand = (node) => {
+    // Adiciona a chave do nó à lista de nós expandidos, se já não estiver lá
+    if (!expandedKeys.includes(node.key)) {
+      setExpandedKeys(prevKeys => [...prevKeys, node.key]);
+    }
+  };
+
   if (loading) return <p>Carregando...</p>;
   if (error) return <p style={{ color: 'red' }}>{error}</p>;
 
@@ -71,21 +103,25 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
     }
   };
 
-  // Renderiza um ícone de pasta moderno
+  const handleExpand = (keys) => {
+    setExpandedKeys(keys);
+  };
+
   const renderIcon = (props) => {
-    // Se o nó está expandido, mostra uma pasta aberta, senão, uma fechada.
-    const iconClass = props.expanded ? 'fas fa-folder-open' : 'fas fa-folder';
+    const iconClass = props.isLeaf ? 'fas fa-folder' : (props.expanded ? 'fas fa-folder-open' : 'fas fa-folder');
     return <i className={`${iconClass} me-2`} style={{ color: '#f1c40f' }}></i>;
   };
 
   const titleRender = (nodeData) => (
-    <TreeNodeTitle nodeData={nodeData} onMoveUser={handleMoveUser} />
+    <TreeNodeTitle nodeData={nodeData} onMoveUser={handleMoveUser} onHoverExpand={handleHoverExpand} />
   );
 
   return (
     <Tree
       treeData={treeData}
       onSelect={handleSelect}
+      onExpand={handleExpand}
+      expandedKeys={expandedKeys}
       showLine
       icon={renderIcon}
       titleRender={titleRender}
