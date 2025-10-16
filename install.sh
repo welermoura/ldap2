@@ -41,32 +41,37 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
     exit 1
 fi
 
-# Check Node.js version
-NODE_MAJOR_VERSION=$(node -v | cut -d. -f1 | sed 's/v//')
-if [ "$NODE_MAJOR_VERSION" -lt 20 ]; then
-    echo "----------------------------------------------------------------"
-    echo "Error: Your Node.js version (v$NODE_MAJOR_VERSION) is too old for this project."
-    echo "Vite (our frontend build tool) requires Node.js version 20 or higher."
-    echo ""
-    echo "We recommend using nvm (Node Version Manager) to easily manage Node.js versions."
-    echo "To install or upgrade, please run the following commands in your terminal:"
-    echo ""
-    echo '1. Install nvm:'
-    echo '   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash'
-    echo ""
-    echo '2. Load nvm (you may need to restart your terminal after installation):'
-    echo '   export NVM_DIR="$HOME/.nvm"'
-    echo '   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
-    echo ""
-    echo '3. Install and use the latest Long-Term Support (LTS) version of Node.js:'
-    echo '   nvm install --lts'
-    echo ""
-    echo "After upgrading, please re-run this installation script."
-    echo "----------------------------------------------------------------"
-    exit 1
+# Check Node.js version and install/update if necessary
+NODE_MAJOR_VERSION=0
+if command -v node &> /dev/null; then
+    NODE_MAJOR_VERSION=$(node -v | cut -d. -f1 | sed 's/v//')
 fi
 
-echo "Node.js version is compatible. Proceeding with frontend build..."
+if [ "$NODE_MAJOR_VERSION" -lt 20 ]; then
+    echo "Node.js version is older than 20 or not installed. Attempting to install/upgrade..."
+    # Ensure the script is run as root for system-wide installations
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "Error: This script requires root privileges to install Node.js. Please run with sudo."
+        exit 1
+    fi
+
+    # Update package lists and install curl if not present
+    apt-get update
+    apt-get install -y curl
+
+    # Use NodeSource repository to get a modern version of Node.js
+    echo "Configuring NodeSource repository for Node.js 20.x..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+
+    # Install Node.js
+    echo "Installing Node.js..."
+    apt-get install -y nodejs
+
+    echo "Node.js installation/upgrade complete."
+else
+    echo "Node.js version is compatible (v$NODE_MAJOR_VERSION). Skipping installation."
+fi
+
 echo "Installing frontend dependencies and building React app..."
 if [ -d "frontend" ]; then
     (
