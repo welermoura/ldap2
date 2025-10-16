@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciamento de OUs - Gestão AD{% endblock %}
+
+{% from "_macros.html" import render_page_header %}
+
+{% block head %}
+    {{ super() }}
+    <!-- jsTree CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css" />
+    <style>
+        .ou-container {
+            display: flex;
+            gap: 1.5rem;
+        }
+        #ou-tree-container {
+            flex: 1;
+            min-width: 300px;
+            max-height: 70vh;
+            overflow: auto;
+            padding: 1rem;
+            border: 1px solid var(--glass-border-color);
+            border-radius: 0.5rem;
+            background-color: rgba(0,0,0,0.1);
+        }
+        #user-list-container {
+            flex: 2;
+            min-width: 400px;
+            max-height: 70vh;
+            overflow: auto;
+            padding: 1rem;
+            border: 1px solid var(--glass-border-color);
+            border-radius: 0.5rem;
+            background-color: rgba(0,0,0,0.1);
+        }
+        .user-item {
+            cursor: grab;
+            padding: 0.5rem 1rem;
+            background-color: rgba(var(--bs-body-bg-rgb), 0.8);
+            border: 1px solid var(--glass-border-color);
+            border-radius: 0.3rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .user-item:active {
+            cursor: grabbing;
+        }
+        .jstree-default .jstree-node {
+            color: var(--text-color) !important;
+        }
+        .jstree-default .jstree-anchor {
+            color: var(--text-color) !important;
+        }
+        .jstree-default .jstree-wholerow-hovered {
+            background: var(--glass-hover-bg) !important;
+        }
+        .jstree-default .jstree-wholerow-clicked {
+            background: var(--glass-selected-bg) !important;
+        }
+        #user-list-container .list-group-item {
+            background-color: transparent;
+            border-color: var(--glass-border-color);
+        }
+        #user-list-container h5 {
+            color: var(--text-color);
+        }
+    </style>
+{% endblock %}
+
+{% block page_title %}
+    {{ render_page_header('<i class="fas fa-sitemap me-2"></i>Gerenciamento de Unidades Organizacionais', show_nav_buttons=True) }}
+{% endblock %}
+
+{% block content %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <div class="input-group">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input type="text" id="ou-search-input" class="form-control" placeholder="Buscar por nome da OU...">
+        </div>
+    </div>
+</div>
+
+<div class="ou-container">
+    <div id="ou-tree-container">
+        <div class="text-center p-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Carregando Árvore de OUs...</span>
+            </div>
+            <p class="mt-2">Carregando Árvore de OUs...</p>
+        </div>
+    </div>
+    <div id="user-list-container">
+        <div class="text-center text-muted p-5">
+            <i class="fas fa-mouse-pointer fa-3x mb-3"></i>
+            <h5>Selecione uma OU na árvore para ver os usuários.</h5>
+            <p>Você poderá arrastar usuários desta lista para uma nova OU na árvore à esquerda.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <!-- jQuery -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- jsTree -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
+    <!-- SortableJS (para drag-and-drop) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+    <script>
+        $(function () {
+            // 1. Inicializar a Árvore de OUs
+            $('#ou-tree-container').jstree({
+                'core' : {
+                    'data' : {
+                        'url' : '/api/ou_tree',
+                        'dataType' : 'json'
+                    },
+                    'check_callback' : true, // Permite dnd
+                    'themes': { 'responsive': true }
+                },
+                'plugins' : [ 'dnd', 'search', 'wholerow' ]
+            });
+
+            // 2. Lógica de Busca na Árvore
+            var to = false;
+            $('#ou-search-input').keyup(function () {
+                if(to) { clearTimeout(to); }
+                to = setTimeout(function () {
+                    var v = $('#ou-search-input').val();
+                    $('#ou-tree-container').jstree(true).search(v);
+                }, 250);
+            });
+
+            // 3. Carregar Usuários ao Selecionar uma OU
+            $('#ou-tree-container').on('select_node.jstree', function (e, data) {
+                var ou_dn = data.node.id;
+                var ou_name = data.node.text;
+                var userList = $('#user-list-container');
+                userList.html('<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Carregando usuários...</p></div>');
+
+                fetch(`/api/ou_users/${encodeURIComponent(ou_dn)}`)
+                    .then(response => response.json())
+                    .then(users => {
+                        userList.html(`
+                            <h5 class="mb-3">Usuários em: ${ou_name}</h5>
+                            <div id="user-sortable-list" class="list-group"></div>
+                        `);
+                        var sortableList = document.getElementById('user-sortable-list');
+                        if (users.length === 0) {
+                            sortableList.innerHTML = '<div class="list-group-item text-muted">Nenhum usuário encontrado nesta OU.</div>';
+                        } else {
+                            users.forEach(user => {
+                                var userEl = document.createElement('div');
+                                userEl.className = 'list-group-item user-item';
+                                userEl.dataset.userDn = user.dn;
+                                userEl.innerHTML = `
+                                    <span>
+                                        <i class="fas fa-user me-2"></i>
+                                        ${user.displayName}
+                                    </span>
+                                    <small class="text-muted">${user.sAMAccountName}</small>
+                                `;
+                                sortableList.appendChild(userEl);
+                            });
+                            // Inicializa o SortableJS para permitir arrastar
+                            new Sortable(sortableList, {
+                                group: 'shared',
+                                animation: 150
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching users:', error);
+                        userList.html('<div class="alert alert-danger">Falha ao carregar usuários.</div>');
+                    });
+            });
+
+            // 4. Lógica de Drag-and-Drop
+            $(document).on('dnd_stop.vakata', function (e, data) {
+                var tree = $('#ou-tree-container').jstree(true);
+                var targetNode = tree.get_node(data.event.target);
+
+                // Verifica se o alvo é um nó válido na árvore
+                if (!targetNode || !targetNode.id) {
+                    console.log("Drop target is not a valid tree node.");
+                    return;
+                }
+
+                // O elemento que foi arrastado
+                var draggedElement = data.element.querySelector('.user-item') || data.element;
+                if (!draggedElement || !draggedElement.dataset.userDn) {
+                    console.log("Dragged element is not a user item.");
+                    return;
+                }
+
+                var user_dn = draggedElement.dataset.userDn;
+                var target_ou_dn = targetNode.id;
+
+                // Evita mover para a mesma OU
+                var original_ou_dn = user_dn.substring(user_dn.indexOf(',') + 1);
+                if (original_ou_dn === target_ou_dn) {
+                    showToast('Aviso', 'O usuário já está nesta OU.', 'warning');
+                    return;
+                }
+
+                // Confirmação
+                if (!confirm(`Tem certeza que deseja mover o usuário para a OU "${targetNode.text}"?`)) {
+                    return;
+                }
+
+                // Chamada da API para mover o usuário
+                fetch('/api/move_user', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ form.csrf_token._value() if form else "" }}' // Se houver um formulário Flask na página
+                    },
+                    body: JSON.stringify({
+                        user_dn: user_dn,
+                        target_ou_dn: target_ou_dn
+                    })
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, body: data })))
+                .then(({ ok, status, body }) => {
+                    if (ok) {
+                        showToast('Sucesso!', body.message, 'success');
+                        // Remove o usuário da lista visualmente
+                        draggedElement.remove();
+                        // Atualiza o DN do usuário no elemento caso ele seja usado novamente
+                        // (melhor recarregar a lista)
+                        // Para uma melhor UX, podemos recarregar a lista da OU de origem e de destino
+                        tree.select_node(target_ou_dn, true); // Seleciona a nova OU para mostrar o usuário movido
+                    } else {
+                        showToast('Erro!', body.error || 'Ocorreu um erro desconhecido.', 'danger');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error moving user:', error);
+                    showToast('Erro de Rede!', 'Não foi possível conectar ao servidor.', 'danger');
+                });
+            });
+
+            // Função para mostrar Toasts (notificações)
+            function showToast(title, message, type = 'info') {
+                var toastContainer = document.getElementById('toast-container');
+                if (!toastContainer) {
+                    toastContainer = document.createElement('div');
+                    toastContainer.id = 'toast-container';
+                    toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+                    document.body.appendChild(toastContainer);
+                }
+
+                var toastId = 'toast-' + Date.now();
+                var toastHTML = `
+                    <div id="${toastId}" class="toast bg-${type}" role="alert" aria-live="assertive" aria-atomic="true">
+                        <div class="toast-header">
+                            <strong class="me-auto">${title}</strong>
+                            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                        </div>
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                    </div>
+                `;
+                toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+                var toastElement = new bootstrap.Toast(document.getElementById(toastId));
+                toastElement.show();
+            }
+        });
+    </script>
+{% endblock %}
