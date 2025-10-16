@@ -260,7 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 let url = `/api/dashboard_list/${modalCurrentCategory}`;
                 if (modalNextCookie) {
-                    url += `?cookie=${modalNextCookie}`;
+                    url += `?cookie=${encodeURIComponent(modalNextCookie)}`;
                 } else {
                     url += `?page=${modalCurrentPage}`;
                 }
@@ -272,29 +272,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 const responseData = await response.json();
+                console.log("API Response:", JSON.stringify(responseData)); // Log de diagnóstico
                 const newItems = responseData.items || [];
 
                 allModalData.push(...newItems); // Acumula os dados
                 appendToModalList(newItems); // Adiciona os novos itens ao DOM
 
-                // Atualiza o estado da paginação de forma explícita para evitar conflitos
-                if (responseData.cookie !== undefined) {
-                    modalNextCookie = responseData.cookie;
+                // Atualiza o estado da paginação com base na resposta
+                const isCookiePagination = ['active_users', 'disabled_users'].includes(modalCurrentCategory);
+
+                let hasMore = false;
+                if (isCookiePagination) {
+                    modalNextCookie = responseData.cookie || null;
+                    hasMore = modalNextCookie !== null && newItems.length > 0;
                 } else {
-                    modalNextCookie = null; // Reseta o cookie se a paginação for por página
+                    modalTotalPages = responseData.total_pages || 1;
+                    modalCurrentPage = (responseData.page || 0) + 1;
+                    hasMore = modalCurrentPage <= modalTotalPages && newItems.length > 0;
                 }
 
-                if (responseData.total_pages !== undefined) {
-                    modalTotalPages = responseData.total_pages;
-                    modalCurrentPage = responseData.page + 1; // Prepara para a próxima página
-                } else {
-                    // Reseta o estado de página se a paginação for por cookie
-                    modalTotalPages = 1;
-                    modalCurrentPage = 1;
-                }
-
-                // Recalcula a visibilidade do botão com base no estado atualizado
-                const hasMore = (modalNextCookie !== null) || (modalCurrentPage <= modalTotalPages && modalTotalPages > 1);
                 loadMoreBtn.style.display = hasMore ? 'block' : 'none';
 
             } catch (error) {
