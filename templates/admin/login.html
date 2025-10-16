@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_form_helpers.html" import render_field %}
+
+{% block title %}Login de Administrador - Gestão AD{% endblock %}
+
+{# This page uses a custom layout, so we override the main body block #}
+{% block body_content %}
+<div class="login-wrapper">
+    <div class="glass-card login-card">
+        <div class="login-icon">
+            <i class="fas fa-user-cog"></i>
+        </div>
+
+        <h2 class="mb-4">Acesso Restrito</h2>
+        <p class="text-muted mb-3">Painel de Administração</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category in ['error', 'danger'] else category }} text-center p-2 mb-3">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('admin_login') }}" class="needs-validation" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ render_field(form.username, class='form-control-lg text-center', placeholder='Usuário Admin', label_visible=false) }}
+            </div>
+            <div class="mb-3">
+                {{ render_field(form.password, class='form-control-lg text-center', placeholder='Senha', label_visible=false) }}
+            </div>
+            <div class="d-grid mt-4">
+                 {{ form.submit(class="btn btn-primary btn-lg") }}
+            </div>
+        </form>
+
+        <a href="{{ url_for('login') }}" class="admin-link mt-4">Voltar para o Login de Operador</a>
+    </div>
+</div>
+{% endblock %}
+
+{# We don't use the default content block for this special page layout #}
+{% block content %}{% endblock %}
+
+{# No footer on the login page #}
+{% block footer %}{% endblock %}

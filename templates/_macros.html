@@ -1,0 +1,29 @@
+{% macro render_page_header(page_title, extra_actions=None, show_nav_buttons=True) %}
+<div class="page-header mb-4">
+    <h1>{{ page_title | safe }}</h1>
+    <div class="page-actions d-flex align-items-center">
+        {% if extra_actions %}
+            {{ extra_actions | safe }}
+        {% endif %}
+        {% if show_nav_buttons %}
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary me-2"><i class="fas fa-home me-1"></i>Home</a>
+        <a href="javascript:history.back()" class="btn btn-outline-secondary me-2"><i class="fas fa-arrow-left me-1"></i>Voltar</a>
+        {% endif %}
+
+        {% if session.ad_user %}
+        <div class="dropdown me-2">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="userMenuButton" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="fas fa-user-circle me-1"></i>{{ session.user_display_name or 'Usuário' }}
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end" aria-labelledby="userMenuButton">
+                <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i>Sair</a></li>
+            </ul>
+        </div>
+        {% endif %}
+
+        <button id="theme-toggle" class="btn btn-outline-secondary" style="width: 40px; height: 40px; border-radius: 50%;">
+            <i class="fas fa-moon"></i>
+        </button>
+    </div>
+</div>
+{% endmacro %}

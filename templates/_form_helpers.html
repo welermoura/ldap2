@@ -1,0 +1,32 @@
+{% macro render_field(field, label_visible=true) %}
+    {# A variável 'kwargs' está implicitamente disponível no Jinja2 com os argumentos extras. #}
+    {# Definimos uma classe padrão e a combinamos com qualquer classe que for passada. #}
+    {% set default_class = 'form-control' %}
+    {% set provided_class = kwargs.pop('class', '') %}
+    {% set final_class = default_class + ' ' + provided_class if provided_class else default_class %}
+
+    <div class="form-group">
+        {% if label_visible and field.label %}
+            {{ field.label(class="form-label") }}
+        {% endif %}
+        {# Renderiza o campo, passando as classes finais e quaisquer outros argumentos. #}
+        {{ field(class=final_class, **kwargs) }}
+        {% if field.errors %}
+            <div class="invalid-feedback">
+                {% for error in field.errors %}
+                    <span>{{ error }}</span>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+{% endmacro %}
+
+{% macro render_submit_button(field) %}
+    {# A variável 'kwargs' está implicitamente disponível. #}
+    {# Define uma classe padrão, mas permite que ela seja substituída pela que for passada. #}
+    {% set default_class = 'btn btn-primary' %}
+    {% set final_class = kwargs.pop('class', default_class) %}
+
+    {# Renderiza o botão com as classes e quaisquer outros argumentos. #}
+    {{ field(class=final_class, **kwargs) }}
+{% endmacro %}

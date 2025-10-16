@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Gerenciamento de Colaboradores{% endblock %}
+
+{% from "_macros.html" import render_page_header %}
+
+{% block page_title %}
+    {{ render_page_header('<i class="fas fa-users-cog me-2"></i>Gerenciamento de Colaboradores', show_nav_buttons=False) }}
+{% endblock %}
+
+{% block content %}
+{% set show_quick_actions = check_permission(action='can_create') or check_permission(action='can_edit') or check_permission(action='can_manage_groups') or check_permission(view='can_export_data') %}
+{% if show_quick_actions %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <h5 class="card-title mb-3 text-center"><i class="fas fa-rocket me-2"></i>Ações Rápidas</h5>
+        <div class="row g-2 justify-content-center">
+            {% if check_permission(action='can_create') %}
+            <div class="col-auto"><a href="{{ url_for('create_user_form') }}" class="btn btn-primary btn-quick-action"><i class="fas fa-user-plus me-2"></i>Criar Usuário</a></div>
+            {% endif %}
+            {% if check_permission(action='can_edit') %}
+            <div class="col-auto"><a href="{{ url_for('manage_users') }}" class="btn btn-warning btn-quick-action"><i class="fas fa-users-cog me-2"></i>Gerenciar Usuários</a></div>
+            {% endif %}
+            {% if check_permission(action='can_manage_groups') %}
+            <div class="col-auto"><a href="{{ url_for('group_management') }}" class="btn btn-info btn-quick-action"><i class="fas fa-layer-group me-2"></i>Gerenciar Grupos</a></div>
+            {% endif %}
+            {% if check_permission(view='can_export_data') %}
+            <div class="col-auto"><a href="{{ url_for('export_ad_data') }}" class="btn btn-success btn-quick-action"><i class="fas fa-file-csv me-2"></i>Exportar Base AD</a></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Linha dos Cards de Estatísticas -->
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-4 justify-content-center mb-4">
+    {% if check_permission(view='can_view_user_stats') %}
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="active_users" data-title="Contas Ativas">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Contas Ativas</div>
+<div class="fs-3 fw-bold text-success">{{ active_users }}</div>
+                </div>
+                <div class="fs-3 text-success opacity-75"><i class="fas fa-user-check"></i></div>
+            </div>
+        </div>
+    </div>
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="disabled_users" data-title="Contas Desativadas">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Contas Desativadas</div>
+                    <div class="fs-3 fw-bold text-warning">{{ disabled_users }}</div>
+                </div>
+                <div class="fs-3 text-warning opacity-75"><i class="fas fa-user-slash"></i></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if check_permission(view='can_view_deactivated_last_week') %}
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="deactivated_last_week" data-title="Desativados (Última Semana)">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Desativados (Última Semana)</div>
+                    <div class="fs-3 fw-bold text-danger">{{ deactivated_last_week }}</div>
+                </div>
+                <div class="fs-3 text-danger opacity-75"><i class="fas fa-user-times"></i></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if check_permission(view='can_view_pending_reactivations') %}
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_reactivations" data-title="Reativações Pendentes (Próx. 7 dias)">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Reativações (Próx. 7 dias)</div>
+                    <div class="fs-3 fw-bold text-info">{{ pending_reactivations }}</div>
+                </div>
+                <div class="fs-3 text-info opacity-75"><i class="fas fa-calendar-check"></i></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if check_permission(view='can_view_pending_deactivations') %}
+    <div class="col dashboard-stat-card" data-bs-toggle="modal" data-bs-target="#dataModal" data-category="pending_deactivations" data-title="Desativações Agendadas (Próx. 7 dias)">
+        <div class="card glass-card h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted text-uppercase fs-7">Desativações (Próx. 7 dias)</div>
+                    <div class="fs-3 fw-bold text-secondary">{{ pending_deactivations }}</div>
+                </div>
+                <div class="fs-3 text-secondary opacity-75"><i class="fas fa-calendar-times"></i></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Linha dos Painéis Principais -->
+<div class="row">
+    {% set show_expiring_passwords = check_permission(view='can_view_expiring_passwords') %}
+
+    <!-- Painel de Senhas Expirando -->
+    {% if show_expiring_passwords %}
+    <div class="col-12 mb-4">
+        <div class="card glass-card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-key me-2 text-warning"></i>Senhas Expirando (Próximos 5 dias)</h5>
+                <span id="expiring-total" class="badge bg-dark rounded-pill">Total: {{ expiring_passwords|length }}</span>
+            </div>
+            <div class="card-body p-0" style="min-height: 250px;">
+                <div id="expiring-list-container" class="list-group list-group-flush">
+                    <!-- O conteúdo será preenchido por JavaScript -->
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="flex-grow-1" style="min-width: 200px;">
+                    <input type="text" id="expiring-search-input" class="form-control form-control-sm" placeholder="Filtrar por nome ou login...">
+                </div>
+                <nav id="expiring-pagination-controls" class="d-flex align-items-center gap-1">
+                    <!-- Controles de paginação serão gerados por JavaScript -->
+                </nav>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal para exibir listas de dados -->
+<div class="modal fade" id="dataModal" tabindex="-1" aria-labelledby="dataModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dataModalLabel">Carregando...</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="modalSearchInput" class="form-control mb-3" placeholder="Filtrar resultados carregados...">
+        <div id="modalContent" class="list-group" style="max-height: 400px; overflow-y: auto;">
+            <div class="text-center p-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="loadMoreBtn" class="btn btn-primary" style="display: none;">Carregar Mais</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Lógica para o modal de detalhes
+    const dataModal = document.getElementById('dataModal');
+    if (dataModal) {
+        let allModalData = [];
+        let modalCurrentPage = 1;
+        let modalTotalPages = 1;
+        let modalNextCookie = null;
+        let modalIsLoading = false;
+        let modalCurrentCategory = '';
+
+        const modalContent = document.getElementById('modalContent');
+        const modalTitle = document.getElementById('dataModalLabel');
+        const modalSearchInput = document.getElementById('modalSearchInput');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+
+        function appendToModalList(data) {
+            // Remove o spinner inicial se ele existir
+            const initialSpinner = modalContent.querySelector('.text-center.p-5');
+            if(initialSpinner) initialSpinner.remove();
+
+            if (data.length === 0 && allModalData.length === 0) {
+                modalContent.innerHTML = '<div class="list-group-item text-muted">Nenhum item encontrado.</div>';
+                return;
+            }
+
+            data.forEach(item => {
+                const a = document.createElement('a');
+                a.href = `/view_user/${item.sam}`;
+                a.className = 'list-group-item list-group-item-action flex-column align-items-start';
+
+                const mainInfo = document.createElement('div');
+                mainInfo.className = 'd-flex w-100 justify-content-between';
+
+                const name = document.createElement('h6');
+                name.className = 'mb-1';
+                name.textContent = item.cn || 'Nome não disponível';
+
+                const sam = document.createElement('small');
+                sam.className = 'text-muted';
+                sam.textContent = item.sam || '';
+
+                mainInfo.appendChild(name);
+
+                if (item.scheduled_date) {
+                    const dateBadge = document.createElement('span');
+                    dateBadge.className = 'badge bg-dark';
+                    dateBadge.textContent = `Data: ${item.scheduled_date}`;
+                    mainInfo.appendChild(dateBadge);
+                } else {
+                    mainInfo.appendChild(sam);
+                }
+
+                const subInfo = document.createElement('p');
+                subInfo.className = 'mb-1 text-muted small';
+
+                const details = [item.title, item.department, item.location].filter(Boolean).join(' • ');
+                subInfo.textContent = details || 'Sem detalhes adicionais';
+
+                a.appendChild(mainInfo);
+                a.appendChild(subInfo);
+
+                if (item.scheduled_date) {
+                    const samInfo = document.createElement('small');
+                    samInfo.className = 'text-muted';
+                    samInfo.textContent = `Login: ${item.sam}`;
+                    a.appendChild(samInfo);
+                }
+                modalContent.appendChild(a);
+            });
+        }
+
+        function filterAndRender() {
+            const query = modalSearchInput.value.toLowerCase();
+            modalContent.innerHTML = ''; // Limpa a lista atual
+
+            const dataToRender = query
+                ? allModalData.filter(item =>
+                    (item.cn && item.cn.toLowerCase().includes(query)) ||
+                    (item.sam && item.sam.toLowerCase().includes(query))
+                  )
+                : allModalData; // Se a busca estiver vazia, usa todos os dados carregados
+
+            appendToModalList(dataToRender);
+        }
+
+        modalSearchInput.addEventListener('input', filterAndRender);
+
+        async function loadMoreModalData() {
+            const hasMoreByPages = modalTotalPages && modalCurrentPage <= modalTotalPages;
+            const hasMoreByCookie = modalNextCookie !== null;
+            if (modalIsLoading || (!hasMoreByPages && !hasMoreByCookie)) return;
+
+            modalIsLoading = true;
+            loadMoreBtn.textContent = 'Carregando...';
+            loadMoreBtn.disabled = true;
+
+            try {
+                let url = `/api/dashboard_list/${modalCurrentCategory}`;
+                if (modalNextCookie) {
+                    url += `?cookie=${encodeURIComponent(modalNextCookie)}`;
+                } else {
+                    url += `?page=${modalCurrentPage}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Falha ao carregar dados.' }));
+                    throw new Error(errorData.error || 'Falha ao carregar dados.');
+                }
+
+                const responseData = await response.json();
+                console.log("API Response:", JSON.stringify(responseData)); // Log de diagnóstico
+                const newItems = responseData.items || [];
+
+                allModalData.push(...newItems); // Acumula os dados
+                appendToModalList(newItems); // Adiciona os novos itens ao DOM
+
+                // Atualiza o estado da paginação com base na resposta
+                const isCookiePagination = ['active_users', 'disabled_users'].includes(modalCurrentCategory);
+
+                let hasMore = false;
+                if (isCookiePagination) {
+                    modalNextCookie = responseData.cookie || null;
+                    hasMore = modalNextCookie !== null && newItems.length > 0;
+                } else {
+                    modalTotalPages = responseData.total_pages || 1;
+                    modalCurrentPage = (responseData.page || 0) + 1;
+                    hasMore = modalCurrentPage <= modalTotalPages && newItems.length > 0;
+                }
+
+                loadMoreBtn.style.display = hasMore ? 'block' : 'none';
+
+            } catch (error) {
+                loadMoreBtn.style.display = 'none';
+                if (allModalData.length === 0) {
+                    modalContent.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                }
+            } finally {
+                modalIsLoading = false;
+                loadMoreBtn.textContent = 'Carregar Mais';
+                loadMoreBtn.disabled = false;
+            }
+        }
+
+        loadMoreBtn.addEventListener('click', loadMoreModalData);
+
+        dataModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            // Reseta o estado para cada vez que o modal é aberto
+            modalCurrentCategory = button.getAttribute('data-category');
+            modalTitle.textContent = button.getAttribute('data-title');
+            modalContent.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+            modalSearchInput.value = '';
+            loadMoreBtn.style.display = 'none';
+
+            allModalData = [];
+            modalCurrentPage = 1;
+            modalTotalPages = 1;
+            modalNextCookie = null;
+            modalIsLoading = false;
+
+            // Inicia o carregamento dos dados
+            loadMoreModalData();
+        });
+    }
+
+    // Lógica para a lista de senhas expirando
+    const expiringPasswordsData = {{ expiring_passwords|tojson }};
+    const listContainer = document.getElementById('expiring-list-container');
+    const paginationControls = document.getElementById('expiring-pagination-controls');
+    const searchInput = document.getElementById('expiring-search-input');
+    const totalBadge = document.getElementById('expiring-total');
+
+    let currentPage = 1;
+    const itemsPerPage = 5;
+    let filteredData = [...expiringPasswordsData];
+
+    function renderList() {
+        listContainer.innerHTML = '';
+        if (filteredData.length === 0) {
+            listContainer.innerHTML = '<div class="text-center text-muted p-4">Nenhum usuário encontrado.</div>';
+            renderPagination();
+            return;
+        }
+
+        const pageData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+        pageData.forEach(user => {
+            const listItem = document.createElement('a');
+            listItem.href = `/view_user/${user.sam}`;
+            listItem.className = 'list-group-item list-group-item-action flex-column align-items-start glass-list-item';
+
+            const mainInfo = document.createElement('div');
+            mainInfo.className = 'd-flex w-100 justify-content-between';
+
+            const name = document.createElement('h6');
+            name.className = 'mb-1';
+            name.textContent = user.cn || 'Nome não disponível';
+
+            const expiryBadge = document.createElement('span');
+            expiryBadge.className = 'badge bg-warning text-dark';
+            expiryBadge.textContent = `Expira em ${user.expires_in_days} dia(s)`;
+
+            mainInfo.appendChild(name);
+            mainInfo.appendChild(expiryBadge);
+
+            const subInfo = document.createElement('p');
+            subInfo.className = 'mb-1 text-muted small';
+            const details = [`Login: ${user.sam}`, user.title, user.department, user.location].filter(Boolean).join(' • ');
+            subInfo.textContent = details || 'Sem detalhes adicionais';
+
+            listItem.appendChild(mainInfo);
+            listItem.appendChild(subInfo);
+            listContainer.appendChild(listItem);
+        });
+        renderPagination();
+    }
+
+    function renderPagination() {
+        paginationControls.innerHTML = '';
+        const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+        if (totalPages <= 1) return;
+
+        // Botão 'Primeiro'
+        const firstBtn = createPaginationButton('«', () => { if (currentPage > 1) { currentPage = 1; renderList(); } }, currentPage === 1);
+        paginationControls.appendChild(firstBtn);
+
+        // Botão 'Anterior'
+        const prevBtn = createPaginationButton('‹', () => { if (currentPage > 1) { currentPage--; renderList(); } }, currentPage === 1);
+        paginationControls.appendChild(prevBtn);
+
+        // Indicador de Página
+        const pageIndicator = document.createElement('span');
+        pageIndicator.className = 'page-indicator px-2 py-1';
+        pageIndicator.textContent = `Pág ${currentPage} de ${totalPages}`;
+        paginationControls.appendChild(pageIndicator);
+
+        // Botão 'Próximo'
+        const nextBtn = createPaginationButton('›', () => { if (currentPage < totalPages) { currentPage++; renderList(); } }, currentPage === totalPages);
+        paginationControls.appendChild(nextBtn);
+
+        // Botão 'Último'
+        const lastBtn = createPaginationButton('»', () => { if (currentPage < totalPages) { currentPage = totalPages; renderList(); } }, currentPage === totalPages);
+        paginationControls.appendChild(lastBtn);
+    }
+
+    function createPaginationButton(text, onClick, disabled = false) {
+        const button = document.createElement('button');
+        button.className = 'btn btn-sm btn-outline-secondary';
+        button.textContent = text;
+        button.disabled = disabled;
+        button.addEventListener('click', onClick);
+        return button;
+    }
+
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.toLowerCase();
+        filteredData = expiringPasswordsData.filter(user =>
+            user.cn.toLowerCase().includes(query) ||
+            user.sam.toLowerCase().includes(query)
+        );
+        currentPage = 1;
+        totalBadge.textContent = `Total: ${filteredData.length}`;
+        renderList();
+    });
+
+    // Renderização inicial
+    renderList();
+});
+</script>
+
+<style>
+    .glass-list-item {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: none;
+        color: var(--text-color);
+    }
+    .glass-list-item:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+        color: var(--text-color);
+    }
+    .page-indicator {
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 0.25rem;
+        font-size: 0.875em;
+    }
+</style>
+{% endblock %}

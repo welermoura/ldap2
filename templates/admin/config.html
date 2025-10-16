@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_form_helpers.html" import render_field %}
+
+{% block title %}Configurações - Gestão AD{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-cogs me-2"></i>Configurações do Sistema</h1>
+    <div>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Home</a>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Voltar ao Painel</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card glass-card">
+    <form method="POST" action="{{ url_for('config') }}">
+        {{ form.hidden_tag() }}
+        <div class="card-body">
+            <p class="card-text mb-4">Preencha as informações abaixo para que a aplicação possa conectar e interagir com seu Active Directory.</p>
+
+            <fieldset>
+                <legend class="h5 mb-3">Conexão AD</legend>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        {{ render_field(form.ad_server) }}
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        {{ render_field(form.ad_domain, placeholder="ex: MEUDOMINIO") }}
+                    </div>
+                </div>
+                <div class="mb-3">
+                    {{ render_field(form.ad_search_base, placeholder="ex: OU=Usuarios,DC=dominio,DC=local") }}
+                    <div class="form-text text-muted">O sufixo UPN para novos usuários (ex: @dominio.local) será derivado deste campo.</div>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    {{ form.use_ldaps(class="form-check-input") }}
+                    {{ form.use_ldaps.label(class="form-check-label") }}
+                </div>
+            </fieldset>
+
+            <hr class="my-4">
+
+            <fieldset>
+                <legend class="h5 mb-3">Credenciais e Padrões</legend>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        {{ render_field(form.service_account_user, placeholder="ex: DOMINIO\\usuario.servico") }}
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        {{ render_field(form.service_account_password, placeholder="Deixe em branco para não alterar") }}
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        {{ render_field(form.default_password, placeholder="Deixe em branco para não alterar") }}
+                    </div>
+                </div>
+            </fieldset>
+        </div>
+        <div class="card-footer text-end">
+            {{ form.submit(class="btn btn-primary btn-lg") }}
+        </div>
+    </form>
+</div>
+{% endblock %}

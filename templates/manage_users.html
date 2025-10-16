@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_form_helpers.html" import render_field, render_submit_button %}
+
+{% block title %}Gerenciar Usuários - Gestão AD{% endblock %}
+
+{% from "_macros.html" import render_page_header %}
+
+{% block page_title %}
+    {{ render_page_header('<i class="fas fa-users me-2"></i>Gerenciar Usuários') }}
+{% endblock %}
+
+{% block content %}
+<div class="card glass-card mb-4">
+    <div class="card-body">
+        <p class="card-text">Busque por um usuário pelo nome ou login para ver detalhes, ativar/desativar, resetar a senha ou editar informações.</p>
+        <form method="POST" action="{{ url_for('manage_users') }}" class="d-flex">
+            {{ form.hidden_tag() }}
+            <div class="flex-grow-1 me-2">
+                {{ render_field(form.search_query, placeholder="Digite o nome ou login do usuário...", label_visible=false) }}
+            </div>
+            {{ render_submit_button(form.submit, class="btn btn-primary btn-lg") }}
+        </form>
+    </div>
+</div>
+
+{% if users is defined and users %}
+    <div class="card glass-card">
+        <div class="card-header">
+            <h5 class="mb-0">Resultados da Busca</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover glass-table mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width: 25%;">Nome</th>
+                            <th style="width: 20%;">Login</th>
+                            <th style="width: 25%;">Email</th>
+                            <th style="width: 15%;">Status</th>
+                            <th style="width: 15%;" class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr>
+                            <td>{{ get_attr_value(user, 'displayName') or get_attr_value(user, 'name') or 'N/A' }}</td>
+                            <td>{{ get_attr_value(user, 'sAMAccountName') }}</td>
+                            <td>{{ get_attr_value(user, 'mail') or 'N/A' }}</td>
+                            <td>
+                                {% set status = get_user_status(user) %}
+                                <span class="badge rounded-pill bg-{{ 'success' if status == 'Ativo' else 'danger' }}">{{ status }}</span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{{ url_for('view_user', username=get_attr_value(user, 'sAMAccountName')) }}" class="btn btn-sm btn-info">
+                                    <i class="fas fa-eye me-1"></i> Ver Detalhes
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% elif users is defined and not users %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle me-2"></i>Nenhum usuário encontrado com o critério informado.
+    </div>
+{% endif %}
+{% endblock %}
