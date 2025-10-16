@@ -100,10 +100,21 @@ const OuTree = ({ onSelectOu, onUserMoved, foundObject }) => {
   useEffect(() => {
     fetch('/api/ou_tree')
       .then(response => {
-        if (!response.ok) throw new Error('Falha ao carregar a estrutura de OUs.');
-        return response.json();
+        if (!response.ok) {
+            throw new Error(`Falha ao carregar a estrutura de OUs (status: ${response.status}).`);
+        }
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        } else {
+            throw new Error("A resposta do servidor não é um JSON válido.");
+        }
       })
       .then(data => {
+        if (!Array.isArray(data)) {
+            throw new Error(data.error || 'A resposta da API para a árvore de OUs não é um formato de array válido.');
+        }
+
         const adaptData = (nodes) => nodes.map(node => ({
           ...node,
           key: node.id,

@@ -14,12 +14,20 @@ const UserList = ({ selectedOu, ouPath }) => {
       setError(null);
       fetch(`/api/ou_users?ou_dn=${encodeURIComponent(selectedOu.id)}`)
         .then(response => {
-          if (!response.ok) {
-            return response.json().then(err => { throw new Error(err.error || 'Falha ao carregar usuários.') });
-          }
-          return response.json();
+            if (!response.ok) {
+                throw new Error(`Falha ao carregar usuários (status: ${response.status}).`);
+            }
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                return response.json();
+            } else {
+                throw new Error("A resposta do servidor para a lista de usuários não é um JSON válido.");
+            }
         })
         .then(data => {
+          if (!Array.isArray(data)) {
+            throw new Error(data.error || 'A resposta da API de usuários não é um formato de array válido.');
+          }
           setUsers(data);
         })
         .catch(err => {
