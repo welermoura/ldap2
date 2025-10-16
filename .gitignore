@@ -19,3 +19,13 @@ flask_secret.key
 .idea/
 *.swp
 *.swo
+
+# Frontend (React/Vite/Node)
+/frontend/node_modules/
+/frontend/dist/
+/static/react/
+/frontend/.env.local
+/frontend/.env.*.local
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
