@@ -1,7 +1,6 @@
 import React from 'react';
 import { useDrag } from 'react-dnd';
 
-// Definimos um tipo para o nosso item arrastável
 const ItemTypes = {
   USER: 'user',
 };
@@ -9,28 +8,39 @@ const ItemTypes = {
 const UserItem = ({ user }) => {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: ItemTypes.USER,
-    // 'item' é a informação que será passada para o alvo quando soltar
     item: { userDn: user.dn, displayName: user.displayName },
     collect: (monitor) => ({
       isDragging: !!monitor.isDragging(),
     }),
   }));
 
+  const userDetailUrl = `/view_user/${user.sAMAccountName}`;
+  const tooltipText = `Cargo: ${user.title || 'N/A'}\nDepartamento: ${user.department || 'N/A'}`;
+
   return (
-    <div
-      ref={drag} // Anexamos a referência de arrastar ao nosso elemento
-      className="user-item"
+    <a
+      href={userDetailUrl}
+      target="_blank" // Abre em nova aba para não perder o estado da página de OUs
+      rel="noopener noreferrer"
+      ref={drag}
+      className="user-item-link"
+      title={tooltipText}
       style={{
         opacity: isDragging ? 0.5 : 1,
-        cursor: 'move',
+        textDecoration: 'none',
       }}
     >
-      <span>
-        <i className="fas fa-user me-2"></i>
-        {user.displayName}
-      </span>
-      <small className="text-muted">{user.sAMAccountName}</small>
-    </div>
+      <div className="user-item">
+        <div className="user-info">
+          <span className="user-name">{user.displayName}</span>
+          <span className="user-login text-muted">{user.sAMAccountName}</span>
+        </div>
+        <div className="user-details text-muted">
+          <span>{user.title || 'Sem cargo'}</span>
+          <span>{user.department || 'Sem depto.'}</span>
+        </div>
+      </div>
+    </a>
   );
 };
 

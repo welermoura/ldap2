@@ -2021,13 +2021,15 @@ def api_ou_users(ou_dn):
             search_base=ou_dn,
             search_filter='(objectClass=user)',
             search_scope=ldap3.LEVEL,
-            attributes=['displayName', 'sAMAccountName']
+            attributes=['displayName', 'sAMAccountName', 'title', 'department']
         )
         users = [
             {
                 'displayName': get_attr_value(entry, 'displayName'),
                 'sAMAccountName': get_attr_value(entry, 'sAMAccountName'),
-                'dn': entry.entry_dn
+                'dn': entry.entry_dn,
+                'title': get_attr_value(entry, 'title'),
+                'department': get_attr_value(entry, 'department')
             }
             for entry in conn.entries
         ]
@@ -2092,6 +2094,38 @@ def api_move_user():
     except Exception as e:
         logging.error(f"Erro ao mover usuário '{user_dn}' para '{target_ou_dn}': {e}", exc_info=True)
         return jsonify({'error': f'Falha ao mover o usuário: {e}'}), 500
+
+
+@app.route('/api/search_user_location')
+@require_auth
+@require_permission(action='can_move_users')
+def api_search_user_location():
+    """
+    API para buscar um usuário em todo o AD e retornar a OU onde ele está localizado.
+    """
+    search_term = request.args.get('q', '').strip()
+    if not search_term:
+        return jsonify({'error': 'Um termo de busca é obrigatório.'}), 400
+
+    try:
+        conn = get_read_connection()
+        # Usamos a função de busca geral existente
+        users = search_general_users(conn, search_term)
+
+        if not users:
+            return jsonify({'error': 'Usuário não encontrado.'}), 404
+
+        # Pega o primeiro usuário encontrado
+        user_entry = users[0]
+        user_dn = user_entry.entry_dn
+        ou_dn = get_ou_from_dn(user_dn)
+
+        # Retorna o DN da OU e o DN completo do usuário para seleção
+        return jsonify({'ou_dn': ou_dn, 'user_dn': user_dn})
+
+    except Exception as e:
+        logging.error(f"Erro na API de busca de localização de usuário para o termo '{search_term}': {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao buscar a localização do usuário.'}), 500
 
 
 @app.route('/export_ad_data')
