@@ -28,7 +28,9 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, 'data')
 logs_dir = os.path.join(basedir, 'logs')
 os.makedirs(data_dir, exist_ok=True)
-os.chmod(data_dir, 0o750) # Permissões mais restritivas
+# A permissão do diretório 'data' deve ser definida pelo administrador do servidor durante o deploy.
+# O usuário do servidor web (ex: www-data) precisa ter permissão de escrita neste diretório.
+# Exemplo de comando no servidor: sudo chown www-data:www-data data && sudo chmod 775 data
 os.makedirs(logs_dir, exist_ok=True)
 
 log_path = os.path.join(logs_dir, 'ad_creator.log')
