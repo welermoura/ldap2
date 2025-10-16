@@ -36,16 +36,11 @@ const TreeNodeTitle = ({ nodeData, onMoveUser, onHoverExpand, isExpanded }) => {
     }
   }, [isOver]);
 
-  const iconClass = nodeData.children?.length > 0
-    ? (isExpanded ? 'fas fa-folder-open' : 'fas fa-folder')
-    : 'fas fa-folder';
-
   return (
     <div ref={drop} className="tree-node-title-wrapper" style={{
       backgroundColor: isOver && canDrop ? 'rgba(24, 144, 255, 0.2)' : 'transparent',
       border: isOver && canDrop ? '1px dashed #1890ff' : '1px dashed transparent',
     }}>
-      <i className={`${iconClass} me-2`} style={{ color: '#f1c40f' }}></i>
       <span>{nodeData.title}</span>
     </div>
   );
@@ -161,6 +156,15 @@ const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
     setExpandedKeys(keys);
   };
 
+  const switcherIcon = (props) => {
+    if (props.isLeaf) {
+      // Nó sem filhos, usa um ícone de espaçamento para manter o alinhamento
+      return <span className="rc-tree-switcher-icon-leaf-close"></span>;
+    }
+    const iconClass = props.expanded ? 'fas fa-folder-open' : 'fas fa-folder';
+    return <i className={`${iconClass} me-1`} style={{ color: '#f1c40f', cursor: 'pointer' }}></i>;
+  };
+
   const titleRender = (nodeData) => (
     <TreeNodeTitle
       nodeData={nodeData}
@@ -179,7 +183,7 @@ const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
       selectedKeys={selectedKeys}
       showLine
       titleRender={titleRender}
-      switcherIcon={() => <span />} // Oculta o switcher padrão para usar o nosso
+      switcherIcon={switcherIcon}
     />
   );
 };
