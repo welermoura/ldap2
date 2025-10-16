@@ -1,5 +1,0 @@
-{
-    "AD_SERVER": "your_ad_server_ip_or_hostname",
-    "DEFAULT_PASSWORD": "DefaultPasswordForNewUsers",
-    "AD_SEARCH_BASE": "OU=Users,DC=yourdomain,DC=com"
-}
