@@ -6,7 +6,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, BooleanField
 from wtforms.validators import DataRequired, ValidationError, Length, EqualTo
 import ldap3
-from ldap3 import Server, Connection, ALL, SUBTREE, BASE
+from ldap3 import Server, Connection, ALL, SUBTREE, BASE, LEVEL
 from ldap3.utils.conv import escape_filter_chars
 from datetime import datetime, timedelta, date, timezone
 import json
@@ -808,6 +808,15 @@ def manage_users():
         except Exception as e:
             flash(f"Erro ao conectar ou buscar usuários: {e}", "error")
     return render_template('manage_users.html', form=form, users=users)
+
+@app.route('/ou_management')
+@require_auth
+@require_permission(action='can_move_users')
+def ou_management():
+    """Página para gerenciar a estrutura de OUs e mover usuários."""
+    # Passa um formulário vazio para o template para gerar o token CSRF
+    form = FlaskForm()
+    return render_template('ou_management.html', form=form)
 
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
@@ -1793,6 +1802,7 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_move_users': f'{group}_can_move_users' in request.form,
                         'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     views = {
@@ -1943,6 +1953,145 @@ def get_expiring_passwords(conn, days=15):
 # ==============================================================================
 # Rota de Exportação de Dados
 # ==============================================================================
+@app.route('/api/ou_tree')
+@require_auth
+@require_permission(action='can_move_users')
+def api_ou_tree():
+    """
+    API para buscar a hierarquia de OUs e retornar como uma árvore JSON.
+    """
+    try:
+        conn = get_read_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+
+        # Busca todas as OUs sob a base de pesquisa
+        conn.search(
+            search_base,
+            '(objectClass=organizationalUnit)',
+            SUBTREE,
+            attributes=['ou', 'distinguishedName']
+        )
+
+        # Constrói um dicionário para facilitar a montagem da árvore
+        all_ous = {
+            entry.entry_dn: {
+                'id': entry.entry_dn,
+                'text': get_attr_value(entry, 'ou'),
+                'parent': get_ou_from_dn(entry.entry_dn),
+                'children': []
+            }
+            for entry in conn.entries
+        }
+
+        # Monta a árvore aninhada
+        tree = []
+        for dn, ou_node in all_ous.items():
+            parent_dn = ou_node['parent']
+            if parent_dn in all_ous:
+                all_ous[parent_dn]['children'].append(ou_node)
+            # Adiciona OUs de nível superior (cujo pai não está na lista ou é a base)
+            elif parent_dn == search_base:
+                tree.append(ou_node)
+
+        # Ordena os filhos de cada nó alfabeticamente
+        for ou_node in all_ous.values():
+            ou_node['children'].sort(key=lambda x: x['text'])
+
+        tree.sort(key=lambda x: x['text'])
+
+        return jsonify(tree)
+
+    except Exception as e:
+        logging.error(f"Erro na API da árvore de OUs: {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao carregar a árvore de OUs.'}), 500
+
+
+@app.route('/api/ou_users/<path:ou_dn>')
+@require_auth
+@require_permission(action='can_move_users')
+def api_ou_users(ou_dn):
+    """
+    API para listar os usuários dentro de uma OU específica.
+    """
+    try:
+        conn = get_read_connection()
+        # Busca apenas por objetos de usuário que são filhos diretos da OU
+        conn.search(
+            search_base=ou_dn,
+            search_filter='(objectClass=user)',
+            search_scope=ldap3.LEVEL,
+            attributes=['displayName', 'sAMAccountName']
+        )
+        users = [
+            {
+                'displayName': get_attr_value(entry, 'displayName'),
+                'sAMAccountName': get_attr_value(entry, 'sAMAccountName'),
+                'dn': entry.entry_dn
+            }
+            for entry in conn.entries
+        ]
+        # Ordena os usuários por nome de exibição
+        users.sort(key=lambda x: x['displayName'])
+        return jsonify(users)
+
+    except ldap3.core.exceptions.LDAPInvalidDnError:
+        return jsonify({'error': 'O caminho da OU fornecido é inválido.'}), 400
+    except Exception as e:
+        logging.error(f"Erro na API de usuários da OU '{ou_dn}': {e}", exc_info=True)
+        return jsonify({'error': f'Falha ao carregar usuários para a OU: {ou_dn}.'}), 500
+
+
+@app.route('/api/move_user', methods=['POST'])
+@require_auth
+@require_permission(action='can_move_users')
+def api_move_user():
+    """
+    API para mover um usuário para uma nova Unidade Organizacional (OU).
+    """
+    data = request.get_json()
+    user_dn = data.get('user_dn')
+    target_ou_dn = data.get('target_ou_dn')
+
+    if not user_dn or not target_ou_dn:
+        return jsonify({'error': 'DN do usuário e DN da OU de destino são obrigatórios.'}), 400
+
+    try:
+        # Para operações de escrita/modificação, sempre usamos a conta de serviço.
+        conn = get_service_account_connection()
+
+        # Extrai o CN do usuário do seu DN para construir o novo DN
+        user_cn = user_dn.split(',')[0]
+        new_user_dn = f"{user_cn},{target_ou_dn}"
+
+        # Utiliza a operação 'modifyDN' para mover o objeto.
+        # O ldap3 trata isso de forma inteligente.
+        conn.modify_dn(user_dn, user_cn, new_parent_dn=target_ou_dn)
+
+        if conn.result['result'] == 0: # 0 indica sucesso em operações LDAP
+            log_message = (
+                f"Usuário movido com sucesso por '{session.get('user_display_name')}'. "
+                f"DN do Usuário: '{user_dn}', "
+                f"Nova OU: '{target_ou_dn}'."
+            )
+            logging.info(log_message)
+            return jsonify({'success': True, 'message': 'Usuário movido com sucesso!', 'new_dn': new_user_dn})
+        else:
+            # Fornece uma mensagem de erro mais detalhada do LDAP, se disponível.
+            error_message = conn.result.get('message', 'Erro desconhecido do servidor LDAP.')
+            raise Exception(error_message)
+
+    except ldap3.core.exceptions.LDAPInvalidDnError as e:
+        logging.warning(f"Tentativa de mover usuário falhou devido a DN inválido: {e}", exc_info=True)
+        return jsonify({'error': f'O DN fornecido é inválido: {e}'}), 400
+    except ldap3.core.exceptions.LDAPEntryAlreadyExistsResult:
+        logging.warning(f"Tentativa de mover usuário falhou porque um objeto com o mesmo nome já existe na OU de destino. User: {user_dn}, Target OU: {target_ou_dn}")
+        return jsonify({'error': 'Um objeto com este nome já existe na OU de destino.'}), 409 # 409 Conflict
+    except Exception as e:
+        logging.error(f"Erro ao mover usuário '{user_dn}' para '{target_ou_dn}': {e}", exc_info=True)
+        return jsonify({'error': f'Falha ao mover o usuário: {e}'}), 500
+
+
 @app.route('/export_ad_data')
 @require_auth
 @require_permission(view='can_export_data')
