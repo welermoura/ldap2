@@ -22,7 +22,7 @@ const TreeNodeTitle = ({ nodeData, onMoveUser }) => {
   return (
     <div ref={drop} style={{
       padding: '2px 5px',
-      backgroundColor: isOver && canDrop ? '#e6f7ff' : 'transparent',
+      backgroundColor: isOver && canDrop ? 'rgba(24, 144, 255, 0.2)' : 'transparent',
       border: isOver && canDrop ? '1px dashed #1890ff' : '1px dashed transparent',
       borderRadius: '2px',
     }}>
@@ -57,9 +57,6 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
   }, []);
 
   const handleMoveUser = (item, targetOuNode) => {
-    // A lógica da chamada da API será adicionada no App.jsx para centralizar o estado
-    console.log(`Mover usuário ${item.userDn} para OU ${targetOuNode.key}`);
-    // A função onUserMoved será passada do App.jsx
     if (onUserMoved) {
         onUserMoved(item, targetOuNode);
     }
@@ -74,7 +71,13 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
     }
   };
 
-  // Usamos titleRender para injetar nosso componente de drop target
+  // Renderiza um ícone de pasta moderno
+  const renderIcon = (props) => {
+    // Se o nó está expandido, mostra uma pasta aberta, senão, uma fechada.
+    const iconClass = props.expanded ? 'fas fa-folder-open' : 'fas fa-folder';
+    return <i className={`${iconClass} me-2`} style={{ color: '#f1c40f' }}></i>;
+  };
+
   const titleRender = (nodeData) => (
     <TreeNodeTitle nodeData={nodeData} onMoveUser={handleMoveUser} />
   );
@@ -83,8 +86,8 @@ const OuTree = ({ onSelectOu, onUserMoved }) => {
     <Tree
       treeData={treeData}
       onSelect={handleSelect}
-      defaultExpandAll
       showLine
+      icon={renderIcon}
       titleRender={titleRender}
     />
   );
