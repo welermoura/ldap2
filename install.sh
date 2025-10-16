@@ -28,6 +28,14 @@ else
     $PYTHON_EXEC -m venv $VENV_DIR
 fi
 
+# --- Set Permissions ---
+echo "Setting permissions for data and logs directories..."
+mkdir -p data logs
+chown -R www-data:www-data data logs
+chmod -R 775 data logs
+touch logs/ad_creator.log
+chmod 666 logs/ad_creator.log
+
 # --- Install Backend Dependencies ---
 echo "Installing backend dependencies from requirements.txt..."
 $VENV_DIR/bin/pip install -r requirements.txt
@@ -82,6 +90,10 @@ if [ -d "frontend" ]; then
 else
     echo "Warning: 'frontend' directory not found. Skipping frontend build."
 fi
+
+# --- Set Final Ownership ---
+echo "Setting final ownership of all project files to www-data..."
+chown -R www-data:www-data .
 
 # --- Final Instructions ---
 echo ""
