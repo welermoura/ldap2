@@ -58,15 +58,15 @@ def api_ou_tree():
 
         conn.search(
             search_base,
-            '(|(objectClass=organizationalUnit)(objectClass=container))',
+            '(objectClass=organizationalUnit)',
             SUBTREE,
-            attributes=['ou', 'cn', 'distinguishedName']
+            attributes=['ou', 'distinguishedName']
         )
 
         all_ous = {
             entry.entry_dn: {
                 'id': entry.entry_dn,
-                'text': get_attr_value(entry, 'ou') or get_attr_value(entry, 'cn'),
+                'text': get_attr_value(entry, 'ou'),
                 'parent': get_ou_from_dn(entry.entry_dn),
                 'children': []
             }
