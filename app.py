@@ -2065,10 +2065,12 @@ def api_move_user():
         new_user_dn = f"{user_cn},{target_ou_dn}"
 
         # Utiliza a operação 'modifyDN' para mover o objeto.
-        # O ldap3 trata isso de forma inteligente.
-        conn.modify_dn(user_dn, user_cn, new_parent_dn=target_ou_dn)
+        # O argumento 'new_superior' é o DN da nova OU de destino.
+        conn.modify_dn(user_dn, user_cn, new_superior=target_ou_dn)
 
         if conn.result['result'] == 0: # 0 indica sucesso em operações LDAP
+            # O novo DN não é retornado diretamente, então o construímos para o log/resposta.
+            new_user_dn = f"{user_cn},{target_ou_dn}"
             log_message = (
                 f"Usuário movido com sucesso por '{session.get('user_display_name')}'. "
                 f"DN do Usuário: '{user_dn}', "
