@@ -28,9 +28,21 @@ else
     $PYTHON_EXEC -m venv $VENV_DIR
 fi
 
-# --- Install Dependencies ---
-echo "Installing dependencies from requirements.txt into the virtual environment..."
+# --- Install Backend Dependencies ---
+echo "Installing backend dependencies from requirements.txt..."
 $VENV_DIR/bin/pip install -r requirements.txt
+
+# --- Install Frontend Dependencies & Build ---
+echo "Installing frontend dependencies and building React app..."
+if [ -d "frontend" ]; then
+    (
+        cd frontend && \
+        npm install && \
+        npm run build
+    )
+else
+    echo "Warning: 'frontend' directory not found. Skipping frontend build."
+fi
 
 # --- Final Instructions ---
 echo ""
