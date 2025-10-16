@@ -32,8 +32,11 @@ const UserItem = ({ user }) => {
     >
       <div className="user-item">
         <div className="user-info">
-          <span className="user-name">{user.displayName}</span>
-          <span className="user-login text-muted">{user.sAMAccountName}</span>
+          <i className={`fas ${user.objectClass === 'computer' ? 'fa-desktop' : 'fa-user'} me-2`}></i>
+          <div>
+            <span className="user-name">{user.displayName}</span>
+            <span className="user-login text-muted">{user.sAMAccountName}</span>
+          </div>
         </div>
         <div className="user-details text-muted">
           <span>{user.title || 'Sem cargo'}</span>

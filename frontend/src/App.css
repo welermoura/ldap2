@@ -49,6 +49,11 @@
 
 .user-info {
   display: flex;
+  align-items: center;
+}
+
+.user-info > div {
+  display: flex;
   flex-direction: column;
 }
 
