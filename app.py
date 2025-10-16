@@ -809,6 +809,17 @@ def manage_users():
             flash(f"Erro ao conectar ou buscar usuários: {e}", "error")
     return render_template('manage_users.html', form=form, users=users)
 
+@app.route('/ou_management')
+@require_auth
+@require_permission(action='can_move_users')
+def ou_management():
+    """Renderiza a página de gerenciamento de OUs com o app React."""
+    # O CSRF token precisa ser passado para o frontend React.
+    # A forma mais fácil é renderizá-lo em uma variável global no template.
+    form = FlaskForm() # Cria um formulário para ter acesso ao CSRF token
+    return render_template('ou_management.html', form=form)
+
+
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
 @require_permission(action='can_manage_groups')
@@ -1125,6 +1136,238 @@ def view_group(group_name):
         flash(f"Erro ao carregar a página do grupo: {e}", "error")
         logging.error(f"Erro ao carregar a view do grupo '{group_name}': {e}", exc_info=True)
         return redirect(url_for('group_management'))
+
+# ==============================================================================
+# APIs de Gerenciamento de OUs
+# ==============================================================================
+def fetch_ou_children(conn, parent_dn):
+    """
+    Busca recursivamente as OUs filhas de um determinado DN.
+    Tanto 'organizationalUnit' quanto 'container' são considerados.
+    """
+    children = []
+    try:
+        # Busca por OUs e Containers que são filhos diretos
+        conn.search(
+            search_base=parent_dn,
+            search_filter='(|(objectClass=organizationalUnit)(objectClass=container))',
+            search_scope=ldap3.LEVEL,
+            attributes=['ou', 'cn', 'distinguishedName']
+        )
+        # Ordena as entradas pelo nome para uma exibição consistente
+        sorted_entries = sorted(conn.entries, key=lambda e: e.ou.value if 'ou' in e else e.cn.value)
+
+        for entry in sorted_entries:
+            # O nome pode estar no atributo 'ou' ou 'cn'
+            name = entry.ou.value if 'ou' in entry else entry.cn.value
+            child_dn = entry.distinguishedName.value
+
+            # Monta o nó da árvore
+            node = {
+                'id': child_dn,
+                'text': name,
+                'children': fetch_ou_children(conn, child_dn) # Chamada recursiva
+            }
+            children.append(node)
+    except ldap3.core.exceptions.LDAPSizeLimitExceededError:
+        # Se o limite de tamanho for excedido, não podemos fazer muito,
+        # mas registramos e retornamos o que temos.
+        logging.warning(f"LDAP size limit exceeded when fetching children of {parent_dn}")
+    except Exception as e:
+        logging.error(f"Erro ao buscar filhos da OU '{parent_dn}': {e}", exc_info=True)
+
+    return children
+
+@app.route('/api/ou_tree')
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_ou_tree():
+    """Retorna a estrutura completa de OUs do AD em formato de árvore."""
+    try:
+        conn = get_read_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+        if not search_base:
+            return jsonify({'error': 'AD_SEARCH_BASE não configurado.'}), 500
+
+        # Busca o nome da própria base de busca para ser a raiz da árvore
+        conn.search(search_base, '(objectClass=*)', ldap3.BASE, attributes=['ou', 'cn', 'name'])
+        root_name = "Raiz do Domínio"
+        if conn.entries:
+            entry = conn.entries[0]
+            # O nome pode estar em 'ou', 'cn' ou 'name'
+            if 'ou' in entry and entry.ou.value:
+                root_name = entry.ou.value
+            elif 'cn' in entry and entry.cn.value:
+                root_name = entry.cn.value
+            elif 'name' in entry and entry.name.value:
+                root_name = entry.name.value
+
+        # A árvore começa com a base de busca como o nó raiz
+        tree = [{
+            'id': search_base,
+            'text': root_name,
+            'children': fetch_ou_children(conn, search_base)
+        }]
+
+        return jsonify(tree)
+    except Exception as e:
+        logging.error(f"Erro na API /api/ou_tree: {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao construir a árvore de OUs.'}), 500
+
+@app.route('/api/ou_users')
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_ou_users():
+    """Retorna os usuários e computadores de uma OU específica."""
+    ou_dn = request.args.get('ou_dn')
+    if not ou_dn:
+        return jsonify({'error': 'Parâmetro ou_dn é obrigatório.'}), 400
+
+    try:
+        conn = get_read_connection()
+        # Busca por usuários e computadores que são filhos diretos da OU
+        conn.search(
+            search_base=ou_dn,
+            search_filter='(|(objectClass=user)(objectClass=computer))',
+            search_scope=ldap3.LEVEL,
+            attributes=['cn', 'sAMAccountName', 'objectClass', 'userAccountControl']
+        )
+
+        users = []
+        for entry in conn.entries:
+            # Determina o tipo de objeto (usuário ou computador)
+            obj_class = entry.objectClass.value
+            obj_type = 'computer' if 'computer' in obj_class else 'user'
+
+            # Verifica se a conta está desativada
+            uac = entry.userAccountControl.value if 'userAccountControl' in entry else 0
+            is_disabled = bool(uac & 2)
+
+            users.append({
+                'id': entry.distinguishedName.value,
+                'name': entry.cn.value,
+                'sam': entry.sAMAccountName.value if 'sAMAccountName' in entry else None,
+                'type': obj_type,
+                'disabled': is_disabled
+            })
+
+        # Ordena por tipo e depois por nome
+        sorted_users = sorted(users, key=lambda x: (x['type'], x['name'].lower()))
+
+        return jsonify(sorted_users)
+    except Exception as e:
+        logging.error(f"Erro na API /api/ou_users para OU '{ou_dn}': {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao buscar usuários na OU.'}), 500
+
+@app.route('/api/search_user_location')
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_search_user_location():
+    """Busca um usuário ou computador e retorna sua localização (OU DN)."""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({'error': 'Parâmetro de busca "q" é obrigatório.'}), 400
+
+    try:
+        conn = get_read_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+
+        # Escapa caracteres especiais para a busca
+        safe_query = escape_filter_chars(query)
+
+        # Busca por displayName (cn) ou sAMAccountName
+        search_filter = f"(&(objectCategory=person)(|(cn={safe_query})(sAMAccountName={safe_query})))"
+
+        # Primeiro, tenta buscar como um usuário
+        conn.search(
+            search_base,
+            search_filter,
+            attributes=['cn', 'sAMAccountName', 'distinguishedName', 'objectClass', 'userAccountControl']
+        )
+
+        entry = conn.entries[0] if conn.entries else None
+
+        # Se não encontrou como usuário, tenta como computador
+        if not entry:
+            search_filter = f"(&(objectClass=computer)(cn={safe_query}))"
+            conn.search(
+                search_base,
+                search_filter,
+                attributes=['cn', 'distinguishedName', 'objectClass', 'userAccountControl']
+            )
+            entry = conn.entries[0] if conn.entries else None
+
+        if not entry:
+            return jsonify({'error': f'Objeto "{query}" não encontrado.'}), 404
+
+        # Extrai o DN da OU pai do DN do objeto
+        ou_dn = get_ou_from_dn(entry.distinguishedName.value)
+
+        obj_class = entry.objectClass.value
+        obj_type = 'computer' if 'computer' in obj_class else 'user'
+        uac = entry.userAccountControl.value if 'userAccountControl' in entry else 0
+        is_disabled = bool(uac & 2)
+
+        result = {
+            'id': entry.distinguishedName.value,
+            'name': entry.cn.value,
+            'sam': entry.sAMAccountName.value if 'sAMAccountName' in entry else None,
+            'type': obj_type,
+            'disabled': is_disabled,
+            'ou_dn': ou_dn
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        logging.error(f"Erro na API /api/search_user_location para query '{query}': {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao buscar a localização do objeto.'}), 500
+
+@app.route('/api/move_user', methods=['POST'])
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_move_user():
+    """Move um usuário ou computador para uma nova OU."""
+    # Validação CSRF
+    form = FlaskForm()
+    try:
+        form.validate_on_submit() # Isso vai falhar se o token não for enviado ou for inválido
+    except ValidationError:
+        return jsonify({'error': 'CSRF token inválido ou ausente.'}), 400
+
+    data = request.get_json()
+    object_dn = data.get('object_dn')
+    target_ou_dn = data.get('target_ou_dn')
+
+    if not object_dn or not target_ou_dn:
+        return jsonify({'error': 'object_dn e target_ou_dn são obrigatórios.'}), 400
+
+    try:
+        conn = get_service_account_connection()
+
+        # O RDN (Relative Distinguished Name) é a primeira parte do DN.
+        # Ex: "CN=John Doe" de "CN=John Doe,OU=Users,DC=corp,DC=com"
+        relative_dn = object_dn.split(',')[0]
+
+        conn.modify_dn(object_dn, relative_dn, new_superior=target_ou_dn)
+
+        if conn.result['result'] == 0: # 0 significa sucesso
+            logging.info(f"Objeto '{object_dn}' movido para '{target_ou_dn}' por '{session.get('user_display_name')}'.")
+            return jsonify({'success': True, 'message': 'Objeto movido com sucesso!'})
+        else:
+            logging.error(f"Falha ao mover objeto '{object_dn}'. Resultado LDAP: {conn.result}")
+            # Tenta fornecer uma mensagem de erro mais amigável
+            error_message = conn.result.get('message', 'Erro desconhecido do servidor LDAP.')
+            if 'OBJECT_ALREADY_EXISTS' in str(error_message).upper():
+                error_message = 'Já existe um objeto com o mesmo nome na OU de destino.'
+            return jsonify({'error': f"Falha ao mover objeto: {error_message}"}), 500
+
+    except Exception as e:
+        logging.error(f"Erro na API /api/move_user: {e}", exc_info=True)
+        return jsonify({'error': 'Ocorreu um erro interno ao mover o objeto.'}), 500
+
 
 @app.route('/api/user_groups/<username>')
 @require_auth

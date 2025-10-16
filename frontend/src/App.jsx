@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import OuTree from './OuTree';
 import UserList from './UserList';
 import './App.css';
@@ -8,40 +8,46 @@ function App() {
   const [ouPath, setOuPath] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [foundObject, setFoundObject] = useState(null);
+  const [searchMessage, setSearchMessage] = useState('');
 
-  const handleMoveUser = (draggedItem, targetOuNode) => {
-    // ... (lógica de mover usuário permanece a mesma)
-  };
+  const handleSelectOu = useCallback((ou) => {
+    setSelectedOu({ id: ou.id });
+    setOuPath(ou.path);
+    setFoundObject(null); // Limpa o objeto encontrado ao selecionar uma OU
+  }, []);
+
+  const handleUserMoved = useCallback(() => {
+    // Incrementa a chave para forçar a remontagem e atualização do UserList
+    setRefreshKey(prevKey => prevKey + 1);
+    // Também poderia recarregar a árvore, se necessário
+  }, []);
 
   const handleSearch = (e) => {
     e.preventDefault();
     if (!searchTerm.trim()) {
-      setIsSearchMode(false);
-      setSearchResults([]);
-      return;
+        setFoundObject(null);
+        setSearchMessage('');
+        return;
     }
 
+    setSearchMessage('Buscando...');
     fetch(`/api/search_user_location?q=${encodeURIComponent(searchTerm)}`)
-      .then(response => response.json())
-      .then(data => {
-        if (data.error) {
-          throw new Error(data.error);
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => { throw new Error(err.error || 'Erro de rede') });
         }
-        setSearchResults(data);
-        setIsSearchMode(true);
+        return response.json();
+      })
+      .then(data => {
+        setFoundObject(data);
+        setSearchMessage(''); // Limpa a mensagem em caso de sucesso
       })
       .catch(error => {
-        alert(error.message || 'Erro ao buscar usuários.');
-        setSearchResults([]);
+        console.error('Search error:', error);
+        setFoundObject(null);
+        setSearchMessage(error.message || 'Erro ao buscar objeto.');
       });
-  };
-
-  const handleSelectOu = (ou) => {
-    setSelectedOu({ id: ou.id });
-    setOuPath(ou.path);
-    setIsSearchMode(false); // Sai do modo de busca ao selecionar uma OU
   };
 
   return (
@@ -60,23 +66,23 @@ function App() {
               <i className="fas fa-search"></i>
             </button>
           </form>
+          {searchMessage && <p className="mt-2 text-info">{searchMessage}</p>}
         </div>
       </div>
 
       <div className="ou-container">
-        <div id="ou-tree-container">
+        <div id="ou-tree-container" className="glass-card">
           <OuTree
             onSelectOu={handleSelectOu}
-            onUserMoved={handleMoveUser}
+            onUserMoved={handleUserMoved}
+            foundObject={foundObject}
           />
         </div>
-        <div id="user-list-container">
+        <div id="user-list-container" className="glass-card">
           <UserList
             key={refreshKey}
             selectedOu={selectedOu}
             ouPath={ouPath}
-            searchResults={searchResults}
-            isSearchMode={isSearchMode}
           />
         </div>
       </div>

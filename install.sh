@@ -32,6 +32,14 @@ fi
 echo "Installing dependencies from requirements.txt into the virtual environment..."
 $VENV_DIR/bin/pip install -r requirements.txt
 
+echo "Installing frontend dependencies from 'frontend/package.json'..."
+if [ -d "frontend" ] && [ -f "frontend/package.json" ]; then
+    (cd frontend && npm install)
+    echo "Frontend dependencies installed. Please run 'npm run build' inside the 'frontend' directory."
+else
+    echo "Warning: 'frontend' directory or 'package.json' not found. Skipping npm install."
+fi
+
 # --- Final Instructions ---
 echo ""
 echo "--- Setup Complete! ---"
