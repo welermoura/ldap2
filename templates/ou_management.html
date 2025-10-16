@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciamento de OUs{% endblock %}
+
+{% block page_title %}
+<div class="page-header">
+    <h1><i class="fas fa-sitemap me-2"></i>Gerenciamento de Unidades Organizacionais</h1>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Home</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="ou-management-root">
+    <div class="d-flex justify-content-center align-items-center" style="height: 50vh;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Carregando Interface...</span>
+        </div>
+        <strong class="ms-3">Carregando Interface...</strong>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{# Inclui React, ReactDOM e Babel via CDN #}
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+{# Dependências para a árvore e Drag-and-Drop #}
+<script src="https://cdn.jsdelivr.net/npm/react-complex-tree@2.2.0/lib/react-complex-tree.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dnd@16.0.1/dist/umd/ReactDnD.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dnd-html5-backend@16.0.1/dist/umd/ReactDnDHTML5Backend.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+    // Passa o token CSRF para o JavaScript
+    window.csrf_token = "{{ form.csrf_token._value() }}";
+
+    const { useState, useEffect, useMemo } = React;
+    const { ControlledTreeEnvironment, Tree, getDescendants } = ReactComplexTree;
+    const { DndProvider, useDrag, useDrop } = ReactDnD;
+    const { HTML5Backend } = ReactDnDHTML5Backend;
+
+    const USER_ITEM_TYPE = 'user';
+
+    const DraggableUser = ({ user }) => {
+        const [{ isDragging }, drag] = useDrag(() => ({
+            type: USER_ITEM_TYPE,
+            item: { id: user.id, ...user },
+            collect: monitor => ({ isDragging: !!monitor.isDragging() }),
+        }));
+
+        return (
+            <div ref={drag} className="list-group-item d-flex justify-content-between align-items-center draggable-user" style={{ opacity: isDragging ? 0.5 : 1, cursor: 'move' }}>
+                <div>
+                    <i className="fas fa-user me-2"></i>
+                    <strong>{user.name}</strong> <small className="text-muted">({user.sam})</small>
+                    <br />
+                    <small className="text-muted">{user.title || 'N/A'}</small>
+                </div>
+            </div>
+        );
+    };
+
+    const DroppableTreeItem = (props) => {
+        const { item, children } = props;
+        const [{ isOver, canDrop }, drop] = useDrop(() => ({
+            accept: USER_ITEM_TYPE,
+            drop: (draggedItem) => props.onDrop(draggedItem, item),
+            canDrop: () => item.isFolder && item.canMove,
+            collect: monitor => ({
+                isOver: !!monitor.isOver(),
+                canDrop: !!monitor.canDrop(),
+            }),
+        }), [item, props.onDrop]);
+
+        let style = {};
+        if (isOver && canDrop) {
+            style.background = 'rgba(40, 167, 69, 0.2)';
+            style.outline = '1px solid var(--bs-success)';
+        }
+
+        return (
+            <div ref={drop} style={style} className="rct-tree-item-container">
+                {children}
+            </div>
+        );
+    };
+
+    const OUManagement = () => {
+        const [treeData, setTreeData] = useState({ root: { index: 'root', children: [], data: 'Root', isFolder: true } });
+        const [focusedItem, setFocusedItem] = useState();
+        const [expandedItems, setExpandedItems] = useState([]);
+        const [selectedItems, setSelectedItems] = useState([]);
+        const [users, setUsers] = useState([]);
+        const [selectedOU, setSelectedOU] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState(null);
+        const [searchQuery, setSearchQuery] = useState('');
+        const [searchResults, setSearchResults] = useState([]);
+        const csrfToken = window.csrf_token;
+
+        useEffect(() => {
+            fetch('/api/ou_tree')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data || data.length === 0) {
+                        setError('Não foi possível carregar a estrutura de OUs. A resposta da API está vazia.');
+                        return;
+                    }
+                    const rootNode = data[0];
+                    const rootId = rootNode.id;
+                    const items = { root: { index: rootId, canMove: false, isFolder: true, children: rootNode.children.map(c => c.id), data: rootNode.name } };
+
+                    function buildItems(nodes) {
+                        nodes.forEach(node => {
+                            items[node.id] = { index: node.id, canMove: true, isFolder: true, children: node.children.map(c => c.id), data: node.name };
+                            if (node.children.length) buildItems(node.children);
+                        });
+                    }
+                    buildItems(rootNode.children);
+                    setTreeData(items);
+                    setExpandedItems([rootId]);
+                    setSelectedOU(rootId);
+                })
+                .catch(err => setError('Falha ao carregar a árvore de OUs. Verifique a conexão e as permissões.'));
+        }, []);
+
+        useEffect(() => {
+            if (!selectedOU) return;
+            setLoading(true);
+            setError(null);
+            fetch(`/api/ou_users/${selectedOU}`)
+                .then(res => res.json())
+                .then(data => { setUsers(data); setLoading(false); })
+                .catch(err => { setError('Falha ao carregar usuários.'); setLoading(false); });
+        }, [selectedOU]);
+
+        const handleMoveUser = (user, targetOU) => {
+            if (!user || !targetOU || !targetOU.isFolder || !targetOU.canMove) return;
+
+            fetch('/api/move_user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ user_dn: user.id, target_ou_dn: targetOU.index }),
+            })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (ok) {
+                    setUsers(prev => prev.filter(u => u.id !== user.id));
+                    alert(data.message || 'Usuário movido com sucesso!');
+                } else {
+                    throw new Error(data.message || 'Erro desconhecido');
+                }
+            })
+            .catch(err => alert(`Erro ao mover usuário: ${err.message}`));
+        };
+
+        const handleSearch = (e) => {
+            e.preventDefault();
+            if (searchQuery.length < 3) { setSearchResults([]); return; }
+            fetch(`/api/search_user_location?query=${searchQuery}`)
+                .then(res => res.json())
+                .then(data => setSearchResults(data))
+                .catch(() => setSearchResults([]));
+        };
+
+        const handleGoToUser = (user) => {
+            const ouPath = user.ou_dn.split(',').reduce((acc, part, i, arr) => {
+                if (i === 0) acc.push(arr.slice(i).join(','));
+                else acc.push(arr.slice(i).join(','));
+                return acc;
+            }, []);
+
+            const fullPath = [treeData.root.index, ...ouPath.reverse()];
+            setExpandedItems(prev => [...new Set([...prev, ...fullPath])]);
+            setSelectedOU(user.ou_dn);
+            setFocusedItem(user.ou_dn);
+            setSearchQuery('');
+            setSearchResults([]);
+        };
+
+        return (
+            <DndProvider backend={HTML5Backend}>
+                <div className="row">
+                    <div className="col-lg-5 mb-4">
+                        <div className="card glass-card h-100">
+                            <div className="card-header"><h5>Estrutura Organizacional</h5></div>
+                            <div className="card-body ou-tree-container" style={{ minHeight: '60vh', overflowY: 'auto' }}>
+                                <ControlledTreeEnvironment
+                                    items={treeData}
+                                    getItemTitle={item => item.data}
+                                    viewState={{ 'ou-tree': { focusedItem, expandedItems, selectedItems } }}
+                                    onFocusItem={item => setFocusedItem(item.index)}
+                                    onExpandItem={item => setExpandedItems([...expandedItems, item.index])}
+                                    onCollapseItem={item => setExpandedItems(expandedItems.filter(id => id !== item.index && !getDescendants(treeData, item.index).includes(id)))}
+                                    onSelectItems={items => { setSelectedItems(items); if (items.length === 1) setSelectedOU(items[0]); }}
+                                    renderItem={props => <DroppableTreeItem {...props} onDrop={handleMoveUser}>{props.children}</DroppableTreeItem>}
+                                >
+                                    <Tree treeId="ou-tree" rootItem="root" treeLabel="Árvore de OUs" />
+                                </ControlledTreeEnvironment>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="col-lg-7">
+                        <div className="card glass-card mb-4">
+                            <div className="card-body">
+                                <form onSubmit={handleSearch}>
+                                    <div className="input-group">
+                                        <input type="text" className="form-control" placeholder="Buscar usuário por nome ou login..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                                        <button className="btn btn-primary" type="submit"><i className="fas fa-search"></i></button>
+                                    </div>
+                                </form>
+                                {searchResults.length > 0 && (
+                                    <div className="list-group mt-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                        {searchResults.map(user => (
+                                            <a href="#" key={user.dn} className="list-group-item list-group-item-action" onClick={(e) => { e.preventDefault(); handleGoToUser(user); }}>
+                                                {user.name} ({user.sam})
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="card glass-card">
+                            <div className="card-header"><h5>Usuários em: {selectedOU && treeData[selectedOU] ? treeData[selectedOU].data : '...'}</h5></div>
+                            <div className="card-body user-list-container" style={{ minHeight: '50vh', overflowY: 'auto' }}>
+                                {loading && <p>Carregando usuários...</p>}
+                                {error && <div className="alert alert-danger">{error}</div>}
+                                {!loading && !error && (
+                                    <div className="list-group">
+                                        {users.map(user => <DraggableUser key={user.id} user={user} />)}
+                                        {users.length === 0 && <p className="text-muted">Nenhum usuário encontrado nesta OU.</p>}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </DndProvider>
+        );
+    };
+
+    const container = document.getElementById('ou-management-root');
+    if (container) {
+        const root = ReactDOM.createRoot(container);
+        root.render(
+            <React.StrictMode>
+                <OUManagement />
+            </React.StrictMode>
+        );
+    } else {
+        console.error('Target container "ou-management-root" not found in the DOM.');
+    }
+</script>
+<style>
+    .ou-tree-container .rct-tree-item-li {
+        line-height: 1.8;
+    }
+    .rct-tree-item-container {
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    .draggable-user {
+        cursor: move;
+    }
+</style>
+{% endblock %}

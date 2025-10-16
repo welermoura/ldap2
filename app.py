@@ -1793,6 +1793,7 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
+                        'can_move_users': f'{group}_can_move_users' in request.form,
                         'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     views = {
@@ -1832,6 +1833,190 @@ def permissions():
         flash(f"Erro ao carregar a página de permissões: {e}", "error")
         logging.error(f"Erro em /admin/permissions: {e}", exc_info=True)
         return redirect(url_for('admin_dashboard'))
+
+# ==============================================================================
+# Rotas de Gerenciamento de OUs
+# ==============================================================================
+def build_ou_tree(ou_list, parent_dn):
+    """
+    Constrói recursivamente uma árvore de OUs a partir de uma lista plana.
+    """
+    tree = []
+    for ou_dn, name in ou_list:
+        # Um filho direto tem o DN do pai como sufixo, e uma parte a mais.
+        if ou_dn.endswith(f',{parent_dn}') and ou_dn.count(',') == parent_dn.count(',') + 1:
+            children = build_ou_tree(ou_list, ou_dn)
+            tree.append({
+                'id': ou_dn,
+                'name': name,
+                'children': children
+            })
+    # Ordena os nós da árvore pelo nome
+    return sorted(tree, key=lambda x: x['name'])
+
+@app.route('/api/ou_tree')
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_ou_tree():
+    try:
+        conn = get_service_account_connection()
+        config = load_config()
+        search_base = config.get('AD_SEARCH_BASE')
+
+        # Busca todas as OUs
+        conn.search(
+            search_base,
+            '(objectClass=organizationalUnit)',
+            SUBTREE,
+            attributes=['ou']
+        )
+
+        # Extrai o DN e o nome (OU) de cada entrada.
+        # O RDN (Relative Distinguished Name) é o nome da própria OU.
+        all_ous = [(ou.entry_dn, ou.ou.value) for ou in conn.entries if 'ou' in ou.entry_attributes_as_dict]
+
+        # Adiciona a base de busca como o nó raiz se ela for uma OU
+        conn.search(search_base, '(objectClass=organizationalUnit)', BASE, attributes=['ou'])
+        if conn.entries and (conn.entries[0].entry_dn, conn.entries[0].ou.value) not in all_ous:
+             root_ou = conn.entries[0]
+             all_ous.append((root_ou.entry_dn, root_ou.ou.value))
+
+        # Constrói a árvore a partir do DN base
+        tree = build_ou_tree(all_ous, search_base)
+
+        # Se a própria base de busca for uma OU, ela deve ser o nó raiz.
+        root_node = None
+        conn.search(search_base, '(objectClass=*)', BASE, attributes=['objectClass', 'ou', 'dc'])
+        if conn.entries:
+            root_entry = conn.entries[0]
+            # O nome do nó raiz pode vir de 'ou' ou 'dc' (para raízes de domínio)
+            root_name = root_entry.ou.value if 'ou' in root_entry else root_entry.dc.value
+            root_node = {
+                'id': search_base,
+                'name': root_name,
+                'children': tree,
+                'state': {'opened': True} # Começa com o nó raiz aberto
+            }
+
+        return jsonify([root_node] if root_node else tree)
+
+    except Exception as e:
+        logging.error(f"Erro ao construir a árvore de OUs: {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao carregar a estrutura de OUs.'}), 500
+
+
+@app.route('/api/ou_users/<path:ou_dn>')
+@require_auth
+@require_api_permission(action='can_move_users')
+def api_ou_users(ou_dn):
+    try:
+        conn = get_service_account_connection()
+
+        # Usamos ONELEVEL para buscar apenas os filhos diretos da OU
+        conn.search(
+            ou_dn,
+            '(&(objectClass=user)(objectCategory=person))',
+            ldap3.ONELEVEL,
+            attributes=['sAMAccountName', 'displayName', 'title', 'distinguishedName']
+        )
+
+        users = [
+            {
+                'id': user.distinguishedName.value,
+                'name': get_attr_value(user, 'displayName') or get_attr_value(user, 'sAMAccountName'),
+                'sam': get_attr_value(user, 'sAMAccountName'),
+                'title': get_attr_value(user, 'title'),
+                'dn': user.distinguishedName.value
+            }
+            for user in conn.entries
+        ]
+
+        # Ordena os usuários pelo nome de exibição
+        return jsonify(sorted(users, key=lambda x: x['name']))
+
+    except Exception as e:
+        logging.error(f"Erro ao buscar usuários para a OU '{ou_dn}': {e}", exc_info=True)
+        return jsonify({'error': f"Falha ao carregar usuários para a OU: {ou_dn}"}), 500
+
+@app.route('/api/move_user', methods=['POST'])
+@require_auth
+@require_api_permission(action='can_move_users')
+def move_user():
+    data = request.get_json()
+    user_dn = data.get('user_dn')
+    target_ou_dn = data.get('target_ou_dn')
+    admin_user = session.get('user_display_name', 'N/A')
+
+    if not user_dn or not target_ou_dn:
+        return jsonify({'success': False, 'message': 'DN do usuário e DN da OU de destino são obrigatórios.'}), 400
+
+    try:
+        conn = get_service_account_connection()
+
+        # O RDN (Relative Distinguished Name) é a primeira parte do DN.
+        # Ex: "CN=John Doe" em "CN=John Doe,OU=Old,DC=corp,DC=com"
+        user_rdn = user_dn.split(',')[0]
+
+        # A função modify_dn move o objeto para o novo superior (a nova OU)
+        conn.modify_dn(user_dn, user_rdn, new_superior=target_ou_dn)
+
+        if conn.result['result'] == 0: # 0 indica sucesso em operações LDAP
+            logging.info(f"Usuário movido com sucesso por '{admin_user}'. DN: '{user_dn}' -> OU de Destino: '{target_ou_dn}'")
+            return jsonify({'success': True, 'message': 'Usuário movido com sucesso!'})
+        else:
+            # Tenta extrair uma mensagem de erro mais clara do resultado
+            error_message = conn.result.get('message', 'Erro desconhecido do servidor LDAP.')
+            logging.error(f"Falha ao mover usuário por '{admin_user}'. DN: '{user_dn}', Destino: '{target_ou_dn}'. Erro: {error_message}")
+            return jsonify({'success': False, 'message': f'Falha ao mover usuário: {error_message}'}), 500
+
+    except ldap3.core.exceptions.LDAPEntryAlreadyExistsResult:
+        logging.error(f"Falha ao mover usuário por '{admin_user}'. DN: '{user_dn}', Destino: '{target_ou_dn}'. Erro: Usuário com o mesmo nome já existe na OU de destino.")
+        return jsonify({'success': False, 'message': 'Um usuário com este nome já existe na OU de destino.'}), 409 # 409 Conflict
+    except Exception as e:
+        logging.error(f"Erro excepcional ao mover usuário '{user_dn}' para '{target_ou_dn}' por '{admin_user}': {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Ocorreu um erro inesperado: {str(e)}'}), 500
+
+@app.route('/api/search_user_location')
+@require_auth
+@require_permission(action='can_move_users')
+def search_user_location():
+    query = request.args.get('query', '')
+    if not query:
+        return jsonify({'error': 'Query parameter is required'}), 400
+
+    try:
+        conn = get_service_account_connection()
+        # Usamos a função de busca geral que já existe
+        users = search_general_users(conn, query)
+
+        if not users:
+            return jsonify([])
+
+        # Retornamos apenas os dados essenciais para a árvore encontrar o usuário
+        user_locations = [
+            {
+                'name': get_attr_value(user, 'displayName') or get_attr_value(user, 'sAMAccountName'),
+                'sam': get_attr_value(user, 'sAMAccountName'),
+                'dn': user.distinguishedName.value,
+                'ou_dn': get_ou_from_dn(user.distinguishedName.value)
+            }
+            for user in users
+        ]
+        return jsonify(user_locations)
+
+    except Exception as e:
+        logging.error(f"Erro ao buscar localização de usuário com query '{query}': {e}", exc_info=True)
+        return jsonify({'error': 'Falha ao buscar localização de usuário.'}), 500
+
+@app.route('/ou_management')
+@require_auth
+@require_permission(action='can_move_users')
+def ou_management():
+    """Renderiza a página de gerenciamento de OUs."""
+    # Passamos um formulário vazio para que o token CSRF esteja disponível no template para o React
+    form = FlaskForm()
+    return render_template('ou_management.html', form=form)
+
 
 # ==============================================================================
 # Funções do Dashboard
