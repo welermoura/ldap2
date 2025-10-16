@@ -2019,9 +2019,9 @@ def api_ou_users(ou_dn):
         # Busca apenas por objetos de usuário que são filhos diretos da OU
         conn.search(
             search_base=ou_dn,
-            search_filter='(objectClass=user)',
+            search_filter='(|(objectClass=user)(objectClass=computer))',
             search_scope=ldap3.LEVEL,
-            attributes=['displayName', 'sAMAccountName', 'title', 'department']
+            attributes=['displayName', 'sAMAccountName', 'title', 'department', 'objectClass']
         )
         users = [
             {
@@ -2029,7 +2029,8 @@ def api_ou_users(ou_dn):
                 'sAMAccountName': get_attr_value(entry, 'sAMAccountName'),
                 'dn': entry.entry_dn,
                 'title': get_attr_value(entry, 'title'),
-                'department': get_attr_value(entry, 'department')
+                'department': get_attr_value(entry, 'department'),
+                'objectClass': 'computer' if 'computer' in entry.objectClass else 'user'
             }
             for entry in conn.entries
         ]
