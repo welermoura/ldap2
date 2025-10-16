@@ -28,60 +28,9 @@ else
     $PYTHON_EXEC -m venv $VENV_DIR
 fi
 
-# --- Install Backend Dependencies ---
-echo "Installing backend dependencies from requirements.txt..."
+# --- Install Dependencies ---
+echo "Installing dependencies from requirements.txt into the virtual environment..."
 $VENV_DIR/bin/pip install -r requirements.txt
-
-# --- Install Frontend Dependencies & Build ---
-echo "Checking for frontend build tools (Node.js and npm)..."
-if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-    echo "Error: Node.js and/or npm are not installed. They are required to build the frontend."
-    echo "Please install them to continue. On Debian/Ubuntu, you can use:"
-    echo "sudo apt update && sudo apt install nodejs npm"
-    exit 1
-fi
-
-# Check Node.js version and install/update if necessary
-NODE_MAJOR_VERSION=0
-if command -v node &> /dev/null; then
-    NODE_MAJOR_VERSION=$(node -v | cut -d. -f1 | sed 's/v//')
-fi
-
-if [ "$NODE_MAJOR_VERSION" -lt 20 ]; then
-    echo "Node.js version is older than 20 or not installed. Attempting to install/upgrade..."
-    # Ensure the script is run as root for system-wide installations
-    if [ "$(id -u)" -ne 0 ]; then
-        echo "Error: This script requires root privileges to install Node.js. Please run with sudo."
-        exit 1
-    fi
-
-    # Update package lists and install curl if not present
-    apt-get update
-    apt-get install -y curl
-
-    # Use NodeSource repository to get a modern version of Node.js
-    echo "Configuring NodeSource repository for Node.js 20.x..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-
-    # Install Node.js
-    echo "Installing Node.js..."
-    apt-get install -y nodejs
-
-    echo "Node.js installation/upgrade complete."
-else
-    echo "Node.js version is compatible (v$NODE_MAJOR_VERSION). Skipping installation."
-fi
-
-echo "Installing frontend dependencies and building React app..."
-if [ -d "frontend" ]; then
-    (
-        cd frontend && \
-        npm install && \
-        npm run build
-    )
-else
-    echo "Warning: 'frontend' directory not found. Skipping frontend build."
-fi
 
 # --- Final Instructions ---
 echo ""

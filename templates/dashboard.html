@@ -24,9 +24,6 @@
             {% if check_permission(action='can_manage_groups') %}
             <div class="col-auto"><a href="{{ url_for('group_management') }}" class="btn btn-info btn-quick-action"><i class="fas fa-layer-group me-2"></i>Gerenciar Grupos</a></div>
             {% endif %}
-            {% if check_permission(action='can_move_users') %}
-            <div class="col-auto"><a href="{{ url_for('ou_management') }}" class="btn btn-secondary btn-quick-action"><i class="fas fa-sitemap me-2"></i>Gerenciar OUs</a></div>
-            {% endif %}
             {% if check_permission(view='can_export_data') %}
             <div class="col-auto"><a href="{{ url_for('export_ad_data') }}" class="btn btn-success btn-quick-action"><i class="fas fa-file-csv me-2"></i>Exportar Base AD</a></div>
             {% endif %}
