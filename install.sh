@@ -33,6 +33,14 @@ echo "Installing backend dependencies from requirements.txt..."
 $VENV_DIR/bin/pip install -r requirements.txt
 
 # --- Install Frontend Dependencies & Build ---
+echo "Checking for frontend build tools (Node.js and npm)..."
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+    echo "Error: Node.js and/or npm are not installed. They are required to build the frontend."
+    echo "Please install them to continue. On Debian/Ubuntu, you can use:"
+    echo "sudo apt update && sudo apt install nodejs npm"
+    exit 1
+fi
+
 echo "Installing frontend dependencies and building React app..."
 if [ -d "frontend" ]; then
     (
