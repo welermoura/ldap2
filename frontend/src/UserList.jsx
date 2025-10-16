@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import UserItem from './UserItem';
 
-const UserList = ({ selectedOu, foundUser }) => {
+const UserList = ({ selectedOu, ouPath, foundUser }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -36,7 +36,7 @@ const UserList = ({ selectedOu, foundUser }) => {
 
   return (
     <div>
-      <h5 className="mb-3">Usuários em: {selectedOu.text || '...'}</h5>
+      <h5 className="mb-3">Usuários em: {ouPath || '...'}</h5>
       {loading && <p>Carregando usuários...</p>}
       {error && <p style={{ color: 'red' }}>{error}</p>}
       {!loading && !error && (
