@@ -5,7 +5,7 @@ const ItemTypes = {
   USER: 'user',
 };
 
-const UserItem = ({ user }) => {
+const UserItem = ({ user, isSearchMode }) => {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: ItemTypes.USER,
     item: { userDn: user.dn, displayName: user.displayName },
@@ -20,14 +20,13 @@ const UserItem = ({ user }) => {
   return (
     <a
       href={userDetailUrl}
-      target="_blank" // Abre em nova aba para não perder o estado da página de OUs
+      target="_blank"
       rel="noopener noreferrer"
       ref={drag}
       className="user-item-link"
       title={tooltipText}
       style={{
         opacity: isDragging ? 0.5 : 1,
-        textDecoration: 'none',
       }}
     >
       <div className="user-item">
@@ -39,8 +38,14 @@ const UserItem = ({ user }) => {
           </div>
         </div>
         <div className="user-details text-muted">
-          <span>{user.title || 'Sem cargo'}</span>
-          <span>{user.department || 'Sem depto.'}</span>
+          {isSearchMode ? (
+            <span className="ou-path">{user.ou_path}</span>
+          ) : (
+            <>
+              <span>{user.title || 'Sem cargo'}</span>
+              <span>{user.department || 'Sem depto.'}</span>
+            </>
+          )}
         </div>
       </div>
     </a>

@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import OuTree from './OuTree';
 import UserList from './UserList';
 import './App.css';
 
 function App() {
   const [selectedOu, setSelectedOu] = useState(null);
-  const [ouPath, setOuPath] = useState(''); // Novo estado para o caminho da OU
+  const [ouPath, setOuPath] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [foundUser, setFoundUser] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
   const handleMoveUser = (draggedItem, targetOuNode) => {
     // ... (lógica de mover usuário permanece a mesma)
@@ -16,24 +17,31 @@ function App() {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    if (!searchTerm.trim()) return;
+    if (!searchTerm.trim()) {
+      setIsSearchMode(false);
+      setSearchResults([]);
+      return;
+    }
 
     fetch(`/api/search_user_location?q=${encodeURIComponent(searchTerm)}`)
       .then(response => response.json())
       .then(data => {
-        setFoundUser(data);
-        setSelectedOu({ id: data.ou_dn });
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        setSearchResults(data);
+        setIsSearchMode(true);
       })
       .catch(error => {
-        alert('Usuário não encontrado.');
-        setFoundUser(null);
+        alert(error.message || 'Erro ao buscar usuários.');
+        setSearchResults([]);
       });
   };
 
   const handleSelectOu = (ou) => {
     setSelectedOu({ id: ou.id });
-    setOuPath(ou.path); // Armazena o caminho completo
-    setFoundUser(null);
+    setOuPath(ou.path);
+    setIsSearchMode(false); // Sai do modo de busca ao selecionar uma OU
   };
 
   return (
@@ -44,7 +52,7 @@ function App() {
             <input
               type="text"
               className="form-control"
-              placeholder="Buscar usuário por nome ou login..."
+              placeholder="Buscar usuário ou computador por nome/login..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -60,15 +68,15 @@ function App() {
           <OuTree
             onSelectOu={handleSelectOu}
             onUserMoved={handleMoveUser}
-            foundUser={foundUser}
           />
         </div>
         <div id="user-list-container">
           <UserList
             key={refreshKey}
             selectedOu={selectedOu}
-            ouPath={ouPath} // Passa o caminho para a lista de usuários
-            foundUser={foundUser}
+            ouPath={ouPath}
+            searchResults={searchResults}
+            isSearchMode={isSearchMode}
           />
         </div>
       </div>
