@@ -1,0 +1,46 @@
+/* Estilos para a biblioteca rc-tree */
+.rc-tree {
+    padding: 0;
+    border: none;
+    background-color: transparent;
+    color: var(--text-color);
+}
+
+.rc-tree .rc-tree-treenode {
+    padding: 2px 0;
+}
+
+.rc-tree .rc-tree-node-content-wrapper {
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.rc-tree .rc-tree-node-content-wrapper:hover {
+    background-color: var(--hover-bg-color);
+}
+
+.rc-tree .rc-tree-switcher-icon {
+    color: #f1c40f; /* Amarelo para os ícones de pasta */
+}
+
+/* Estilos para o título do nó customizado */
+.tree-node-title-wrapper {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px dashed transparent;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+/* Estilo para quando um usuário é arrastado sobre um nó da árvore */
+.tree-node-title-wrapper.drop-target-hover {
+    background-color: rgba(24, 144, 255, 0.2);
+    border-color: #1890ff;
+}
+
+/* Estilo para o nó selecionado */
+.tree-node-title-wrapper.selected-node {
+    background-color: var(--primary-color-light);
+    color: var(--primary-color-text);
+}

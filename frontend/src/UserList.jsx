@@ -1,58 +1,66 @@
 import React, { useState, useEffect } from 'react';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import UserItem from './UserItem';
 
-const UserList = ({ selectedOu, ouPath, searchResults, isSearchMode }) => {
+const UserList = ({ selectedOu, ouPath }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Se não estiver em modo de busca e uma OU for selecionada, busca os usuários da OU
-    if (!isSearchMode && selectedOu) {
+    if (selectedOu?.id) {
       setLoading(true);
       setError(null);
-      fetch(`/api/ou_users/${encodeURIComponent(selectedOu.id)}`)
-        .then(response => response.json())
+      fetch(`/api/ou_users?ou_dn=${encodeURIComponent(selectedOu.id)}`)
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Falha ao carregar usuários.') });
+          }
+          return response.json();
+        })
         .then(data => {
           setUsers(data);
-          setLoading(false);
         })
         .catch(err => {
           setError(err.message);
-          setLoading(false);
-        });
+          setUsers([]); // Limpa usuários em caso de erro
+        })
+        .finally(() => setLoading(false));
     } else {
-      // Se estiver em modo de busca ou nenhuma OU selecionada, limpa a lista
-      setUsers([]);
+      setUsers([]); // Limpa a lista se nenhuma OU for selecionada
+      setError(null);
     }
-  }, [selectedOu, isSearchMode]);
-
-  const itemsToDisplay = isSearchMode ? searchResults : users;
-  const title = isSearchMode ? `Resultados da Busca: ${searchResults.length} encontrado(s)` : `Objetos em: ${ouPath || '...'}`;
-
-  if (!isSearchMode && !selectedOu) {
-    return (
-      <div className="text-center text-muted p-5">
-        <h5>Selecione uma OU ou busque por um objeto.</h5>
-      </div>
-    );
-  }
+  }, [selectedOu]);
 
   return (
-    <div>
-      <h5 className="mb-3">{title}</h5>
-      {loading && <p>Carregando...</p>}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      {!loading && !error && (
-        itemsToDisplay.length > 0 ? (
-          itemsToDisplay.map(item => (
-            <UserItem key={item.dn} user={item} isSearchMode={isSearchMode} />
-          ))
-        ) : (
-          <p className="text-muted">Nenhum objeto encontrado.</p>
-        )
-      )}
-    </div>
+    <DndProvider backend={HTML5Backend}>
+      <div className="user-list-header">
+        <h5 className="mb-0 text-truncate" title={ouPath}>
+            {ouPath || 'Conteúdo da OU'}
+        </h5>
+        <span className="badge bg-dark ms-2">{users.length}</span>
+      </div>
+      <div className="user-list-body">
+        {loading && <div className="p-3 text-center">Carregando usuários...</div>}
+        {error && <div className="p-3 text-center text-danger">{error}</div>}
+        {!loading && !error && !selectedOu && (
+          <div className="p-3 text-center text-muted">
+            <i className="fas fa-arrow-left me-2"></i> Selecione uma OU para ver seu conteúdo.
+          </div>
+        )}
+        {!loading && !error && selectedOu && users.length === 0 && (
+          <div className="p-3 text-center text-muted">Esta OU está vazia.</div>
+        )}
+        {!loading && !error && users.length > 0 && (
+          <div className="list-group list-group-flush">
+            {users.map(user => (
+              <UserItem key={user.id} user={user} parentOuId={selectedOu.id} />
+            ))}
+          </div>
+        )}
+      </div>
+    </DndProvider>
   );
 };
 

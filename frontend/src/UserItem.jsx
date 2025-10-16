@@ -5,50 +5,42 @@ const ItemTypes = {
   USER: 'user',
 };
 
-const UserItem = ({ user, isSearchMode }) => {
+const UserItem = ({ user, parentOuId }) => {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: ItemTypes.USER,
-    item: { userDn: user.dn, displayName: user.displayName },
+    // Os dados que serão passados quando o item for arrastado
+    item: { id: user.id, parentOuId: parentOuId },
     collect: (monitor) => ({
       isDragging: !!monitor.isDragging(),
     }),
   }));
 
-  const userDetailUrl = `/view_user/${user.sAMAccountName}`;
-  const tooltipText = `Cargo: ${user.title || 'N/A'}\nDepartamento: ${user.department || 'N/A'}`;
+  const getIcon = () => {
+    const iconClass = user.type === 'computer' ? 'fa-desktop' : 'fa-user';
+    const colorClass = user.disabled ? 'text-warning' : 'text-primary';
+    return <i className={`fas ${iconClass} me-3 ${colorClass}`}></i>;
+  };
 
   return (
-    <a
-      href={userDetailUrl}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
       ref={drag}
-      className="user-item-link"
-      title={tooltipText}
+      className="list-group-item list-group-item-action user-item"
       style={{
         opacity: isDragging ? 0.5 : 1,
+        cursor: 'move',
       }}
     >
-      <div className="user-item">
-        <div className="user-info">
-          <i className={`fas ${user.objectClass === 'computer' ? 'fa-desktop' : 'fa-user'} me-2`}></i>
-          <div>
-            <span className="user-name">{user.displayName}</span>
-            <span className="user-login text-muted">{user.sAMAccountName}</span>
-          </div>
+      <div className="d-flex w-100 align-items-center">
+        {getIcon()}
+        <div className="flex-grow-1">
+          <h6 className="mb-0">{user.name}</h6>
+          {user.sam && <small className="text-muted">{user.sam}</small>}
         </div>
-        <div className="user-details text-muted">
-          {isSearchMode ? (
-            <span className="ou-path">{user.ou_path}</span>
-          ) : (
-            <>
-              <span>{user.title || 'Sem cargo'}</span>
-              <span>{user.department || 'Sem depto.'}</span>
-            </>
-          )}
-        </div>
+        {user.disabled && (
+            <span className="badge bg-warning text-dark">Desativado</span>
+        )}
       </div>
-    </a>
+    </div>
   );
 };
 

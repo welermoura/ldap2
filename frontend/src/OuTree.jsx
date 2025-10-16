@@ -1,52 +1,95 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Tree from 'rc-tree';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Tree, { TreeNode } from 'rc-tree';
 import { useDrop } from 'react-dnd';
 import 'rc-tree/assets/index.css';
+import './OuTree.css'; // Estilos customizados
 
 const ItemTypes = {
   USER: 'user',
 };
 
-const TreeNodeTitle = ({ nodeData, onMoveUser, onHoverExpand, isExpanded }) => {
-  const timerRef = useRef(null);
+const CustomTreeNode = ({ nodeData, onMoveUser, onHoverExpand, isExpanded, isSelected }) => {
+    const timerRef = useRef(null);
 
-  const [{ isOver, canDrop }, drop] = useDrop(() => ({
-    accept: ItemTypes.USER,
-    drop: (item) => onMoveUser(item, nodeData),
-    hover: (item, monitor) => {
-      if (monitor.isOver({ shallow: true }) && !isExpanded) {
-        if (!timerRef.current) {
-          timerRef.current = setTimeout(() => {
-            onHoverExpand(nodeData);
-            timerRef.current = null;
-          }, 700);
+    const [{ isOver, canDrop }, drop] = useDrop(() => ({
+      accept: ItemTypes.USER,
+      drop: (item) => onMoveUser(item, nodeData),
+      hover: (item, monitor) => {
+        if (monitor.isOver({ shallow: true }) && !isExpanded) {
+          if (!timerRef.current) {
+            timerRef.current = setTimeout(() => {
+              onHoverExpand(nodeData);
+              timerRef.current = null;
+            }, 700); // Atraso para expandir
+          }
         }
+      },
+      collect: (monitor) => ({
+        isOver: !!monitor.isOver({ shallow: true }),
+        canDrop: !!monitor.canDrop(),
+      }),
+    }));
+
+    useEffect(() => {
+      // Limpa o timer se o mouse sair do nó
+      if (!isOver && timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
-    },
-    collect: (monitor) => ({
-      isOver: !!monitor.isOver({ shallow: true }),
-      canDrop: !!monitor.canDrop(),
-    }),
-  }));
+    }, [isOver]);
 
-  useEffect(() => {
-    if (!isOver && timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, [isOver]);
+    // Define a classe do título para estilização
+    const titleClassName = `tree-node-title-wrapper ${isOver && canDrop ? 'drop-target-hover' : ''} ${isSelected ? 'selected-node' : ''}`;
 
-  return (
-    <div ref={drop} className="tree-node-title-wrapper" style={{
-      backgroundColor: isOver && canDrop ? 'rgba(24, 144, 255, 0.2)' : 'transparent',
-      border: isOver && canDrop ? '1px dashed #1890ff' : '1px dashed transparent',
-    }}>
-      {nodeData.title}
-    </div>
-  );
+    return (
+      <div ref={drop} className={titleClassName}>
+        {nodeData.title}
+      </div>
+    );
 };
 
-const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
+// Função para encontrar o caminho de um nó (breadcrumb)
+const getPathForNode = (key, nodes) => {
+    const path = [];
+    let currentNode = nodes.find(n => n.key === key);
+    while (currentNode) {
+      path.unshift(currentNode.title);
+      // Encontra o pai do nó atual
+      const parent = nodes.find(p => p.children?.some(child => child.key === currentNode.key));
+      currentNode = parent;
+    }
+    return path.join(' > ');
+};
+
+// Função para obter todos os nós em uma lista plana
+const flattenTree = (nodes) => {
+    let list = [];
+    nodes.forEach(node => {
+        list.push(node);
+        if (node.children) {
+            list = list.concat(flattenTree(node.children));
+        }
+    });
+    return list;
+};
+
+// Função para obter os DNs pais de um nó
+const getParentDns = (ouDn, allNodes) => {
+    const parents = [];
+    let currentNodeKey = ouDn;
+    let parentNode;
+    do {
+      parentNode = allNodes.find(n => n.children?.some(c => c.key === currentNodeKey));
+      if (parentNode) {
+        parents.push(parentNode.key);
+        currentNodeKey = parentNode.key;
+      }
+    } while (parentNode);
+    return parents;
+};
+
+
+const OuTree = ({ onSelectOu, onUserMoved, foundObject }) => {
   const [treeData, setTreeData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,26 +97,12 @@ const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [allNodes, setAllNodes] = useState([]);
 
-  const getPathForNode = (key, nodes) => {
-    const path = [];
-    let currentNode = nodes.find(n => n.key === key);
-    while(currentNode) {
-        path.unshift(currentNode.title);
-        let parentKey = null;
-        for(const node of nodes) {
-            if(node.children?.some(child => child.key === currentNode.key)) {
-                parentKey = node.key;
-                break;
-            }
-        }
-        currentNode = parentKey ? nodes.find(n => n.key === parentKey) : null;
-    }
-    return path.join(' > ');
-  };
-
   useEffect(() => {
     fetch('/api/ou_tree')
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) throw new Error('Falha ao carregar a estrutura de OUs.');
+        return response.json();
+      })
       .then(data => {
         const adaptData = (nodes) => nodes.map(node => ({
           ...node,
@@ -84,76 +113,80 @@ const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
 
         const adaptedData = adaptData(data);
         setTreeData(adaptedData);
+        setAllNodes(flattenTree(adaptedData));
 
-        const getAllNodes = (nodes) => {
-            let list = [];
-            nodes.forEach(node => {
-                list.push(node);
-                if (node.children) {
-                    list = list.concat(getAllNodes(node.children));
-                }
-            });
-            return list;
-        };
-        setAllNodes(getAllNodes(adaptedData));
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (foundUser && allNodes.length > 0) {
-      const { ou_dn } = foundUser;
-      const parentDns = getParentDns(ou_dn, allNodes);
-      setExpandedKeys([...parentDns, ou_dn]);
-      setSelectedKeys([ou_dn]);
-      const path = getPathForNode(ou_dn, allNodes);
-      onSelectOu({ id: ou_dn, text: path, path: path });
-    }
-  }, [foundUser, allNodes, onSelectOu]);
-
-  const getParentDns = (ouDn, nodes) => {
-    const parents = [];
-    let currentKey = ouDn;
-    let parentNode;
-    do {
-        parentNode = nodes.find(n => n.children?.some(c => c.key === currentKey));
-        if(parentNode) {
-            parents.push(parentNode.key);
-            currentKey = parentNode.key;
+        // Expande o nó raiz por padrão
+        if (adaptedData.length > 0) {
+            setExpandedKeys([adaptedData[0].key]);
         }
-    } while(parentNode);
-    return parents;
-  };
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [onUserMoved]); // Recarrega a árvore se um usuário for movido
+
+  // Efeito para lidar com um objeto encontrado na busca
+  useEffect(() => {
+    if (foundObject && allNodes.length > 0) {
+      const { ou_dn } = foundObject;
+      const parentDns = getParentDns(ou_dn, allNodes);
+
+      setExpandedKeys(prev => [...new Set([...prev, ...parentDns, ou_dn])]);
+      setSelectedKeys([ou_dn]);
+
+      const path = getPathForNode(ou_dn, allNodes);
+      onSelectOu({ id: ou_dn, path: path });
+    }
+  }, [foundObject, allNodes, onSelectOu]);
 
   const handleMoveUser = (item, targetOuNode) => {
-    if (onUserMoved) {
-        onUserMoved(item, targetOuNode);
+    if (item.parentOuId === targetOuNode.key) {
+        console.log("Usuário já está na OU de destino.");
+        return;
     }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || window.csrf_token;
+
+    fetch('/api/move_user', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            object_dn: item.id,
+            target_ou_dn: targetOuNode.key
+        })
+    })
+    .then(response => response.json().then(data => ({ ok: response.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok) {
+            throw new Error(data.error || 'Falha ao mover o usuário.');
+        }
+        alert(data.message || 'Usuário movido com sucesso!');
+        if (onUserMoved) {
+            onUserMoved();
+        }
+    })
+    .catch(error => {
+        console.error('Move error:', error);
+        alert(`Erro: ${error.message}`);
+    });
   };
 
-  const handleHoverExpand = (node) => {
+  const handleHoverExpand = useCallback((node) => {
     if (!expandedKeys.includes(node.key)) {
       setExpandedKeys(prevKeys => [...prevKeys, node.key]);
     }
-  };
-
-  if (loading) return <p>Carregando...</p>;
-  if (error) return <p style={{ color: 'red' }}>{error}</p>;
+  }, [expandedKeys]);
 
   const handleSelect = (keys, { node }) => {
     setSelectedKeys(keys);
-    if (node) {
+    if (keys.length > 0 && node) {
       const path = getPathForNode(node.key, allNodes);
-      onSelectOu({ id: node.key, text: node.title, path: path });
+      onSelectOu({ id: node.key, path: path });
+    } else {
+        onSelectOu(null); // Desseleciona se não houver nó
     }
-  };
-
-  const handleExpand = (keys) => {
-    setExpandedKeys(keys);
   };
 
   const switcherIcon = (props) => {
@@ -161,28 +194,33 @@ const OuTree = ({ onSelectOu, onUserMoved, foundUser }) => {
       return <span className="rc-tree-switcher-icon-leaf-close"></span>;
     }
     const iconClass = props.expanded ? 'fas fa-folder-open' : 'fas fa-folder';
-    return <i className={`${iconClass} me-1 rc-tree-switcher-icon`} style={{ color: '#f1c40f', cursor: 'pointer' }}></i>;
+    return <i className={`${iconClass} me-1 rc-tree-switcher-icon`}></i>;
   };
 
   const titleRender = (nodeData) => (
-    <TreeNodeTitle
+    <CustomTreeNode
       nodeData={nodeData}
       onMoveUser={handleMoveUser}
       onHoverExpand={handleHoverExpand}
       isExpanded={expandedKeys.includes(nodeData.key)}
+      isSelected={selectedKeys.includes(nodeData.key)}
     />
   );
+
+  if (loading) return <div className="p-3 text-center">Carregando árvore...</div>;
+  if (error) return <div className="p-3 text-center text-danger">{error}</div>;
 
   return (
     <Tree
       treeData={treeData}
       onSelect={handleSelect}
-      onExpand={handleExpand}
+      onExpand={setExpandedKeys}
       expandedKeys={expandedKeys}
       selectedKeys={selectedKeys}
       showLine
-      titleRender={titleRender}
       switcherIcon={switcherIcon}
+      titleRender={titleRender}
+      motion={null} // Desativa animações para melhor performance
     />
   );
 };

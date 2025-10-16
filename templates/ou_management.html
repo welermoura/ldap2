@@ -1,39 +1,32 @@
 {% extends "base.html" %}
 
-{% block title %}Gerenciamento de OU - Gestão AD{% endblock %}
-
-{% from "_macros.html" import render_page_header %}
+{% block title %}Gerenciamento de OUs{% endblock %}
 
 {% block head %}
-    {{ super() }}
-    <!-- Carrega o CSS da aplicação React -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='react/assets/index.css') }}">
-{% endblock %}
-
-{% block page_title %}
-    {{ render_page_header('<i class="fas fa-sitemap me-2"></i>Gerenciamento de OU', show_nav_buttons=True) }}
+{{ super() }}
+<!-- Carrega o CSS compilado do React -->
+<link rel="stylesheet" href="{{ url_for('static', filename='react/assets/index.css') }}">
 {% endblock %}
 
 {% block content %}
-    {# Este é o ponto de entrada para a nossa aplicação React #}
-    <div id="root">
-        <div class="text-center p-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Carregando aplicação...</span>
-            </div>
-            <p class="mt-2">Carregando aplicação...</p>
-        </div>
-    </div>
+<div class="container-fluid">
+    <h1 class="h3 mb-4 text-gray-800">Gerenciamento de Unidades Organizacionais</h1>
+    <p class="mb-4">
+        Arraste e solte usuários ou computadores entre as Unidades Organizacionais para movê-los.
+    </p>
+
+    <!-- O aplicativo React será montado aqui -->
+    <div id="root"></div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}
-    {{ super() }}
-
-    {# Passa o token CSRF para a aplicação React através do objeto window #}
-    <script>
-        window.csrf_token = "{{ form.csrf_token._value() }}";
-    </script>
-
-    <!-- Carrega o JavaScript da aplicação React -->
-    <script type="module" src="{{ url_for('static', filename='react/assets/index.js') }}"></script>
+{{ super() }}
+<script>
+    // Passa o CSRF token para o frontend
+    window.csrf_token = "{{ form.csrf_token._value() }}";
+</script>
+<!-- Carrega o JavaScript compilado do React -->
+<script type="module" src="{{ url_for('static', filename='react/assets/index.js') }}"></script>
 {% endblock %}
