@@ -1,47 +1,83 @@
+/* Estilos para o container principal da funcionalidade */
 .ou-container {
   display: flex;
   gap: 1.5rem;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-#ou-tree-container {
+/* Estilo para os painéis da árvore e da lista de usuários */
+#ou-tree-container,
+#user-list-container {
   flex: 1;
   min-width: 300px;
   max-height: 70vh;
   overflow: auto;
   padding: 1rem;
-  border: 1px solid #ccc;
+  /* Utiliza as variáveis de tema para fundo e borda */
+  background-color: var(--glass-background);
+  border: 1px solid var(--glass-border-color);
   border-radius: 0.5rem;
+  color: var(--text-color);
+  box-shadow: var(--box-shadow);
 }
 
 #user-list-container {
   flex: 2;
   min-width: 400px;
-  max-height: 70vh;
-  overflow: auto;
-  padding: 1rem;
-  border: 1px solid #ccc;
-  border-radius: 0.5rem;
 }
 
+/* Estilo para cada item de usuário na lista */
 .user-item {
   cursor: move;
   padding: 0.5rem 1rem;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
+  /* Fundo e borda usando variáveis de tema */
+  background-color: var(--input-background);
+  border: 1px solid var(--glass-border-color);
   border-radius: 0.3rem;
   margin-bottom: 0.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* Cor do texto usando variável de tema */
+  color: var(--text-color);
+  transition: background-color 0.2s;
 }
 
+.user-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Garante que o texto secundário também use a cor do tema */
 .text-muted {
-  color: #6c757d;
+  color: var(--text-muted-color) !important;
 }
 
-/* Estilos para rc-tree */
+/* =============================================== */
+/* Estilos para a biblioteca rc-tree (árvore de OUs) */
+/* =============================================== */
+.rc-tree {
+    color: var(--text-color);
+}
 .rc-tree-title {
   display: inline-block;
   width: 100%;
+}
+.rc-tree .rc-tree-node-content-wrapper:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.rc-tree .rc-tree-node-content-wrapper.rc-tree-node-selected {
+    background-color: var(--primary-color);
+    color: #fff;
+}
+.rc-tree-switcher-icon, .rc-tree-checkbox-inner {
+    border-color: var(--text-color);
+}
+.rc-tree-iconEle {
+    color: var(--text-color) !important;
+}
+.rc-tree.rc-tree-show-line .rc-tree-switcher {
+    background: transparent;
+}
+.rc-tree-line::before, .rc-tree-line::after {
+    border-color: var(--text-muted-color);
 }
