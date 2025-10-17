@@ -222,15 +222,15 @@ $(function () {
                 return;
             }
 
-        // Garante que o elemento arrastado é um usuário da lista
-        const draggedElement = $(data.element);
-        if (!draggedElement.attr('id') || !draggedElement.attr('id').startsWith('user-drag-')) {
-            return;
-        }
-
-        const user_sam = draggedElement.data('sam');
-        const user_text = draggedElement.find('strong').text();
+        // Os dados do nó que iniciou o arraste estão em 'data.data.nodes'.
+        // Esta é a forma mais confiável de obter as informações do usuário.
+        const user_node = data.data.nodes[0];
+        const user_sam = user_node.id;
+        const user_text = user_node.text;
         const target_ou_dn = targetNode.id;
+
+        // O elemento DOM original que foi arrastado, para podermos removê-lo visualmente.
+        const draggedElement = data.data.obj;
 
         if (!user_sam || !target_ou_dn) {
             showAlert('Não foi possível identificar o usuário ou a OU de destino.', 'danger');
