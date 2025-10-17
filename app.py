@@ -1650,9 +1650,14 @@ def build_ou_tree(conn, base_dn):
             # O nome do nó pode ser 'ou' ou 'cn' (para containers como 'Users')
             node_name = get_attr_value(entry, 'ou') or get_attr_value(entry, 'cn')
             children = build_ou_tree(conn, entry.distinguishedName.value)
+
+            # Codifica o DN em Base64 para garantir um ID único e seguro para o frontend
+            dn = entry.distinguishedName.value
+            b64_id = base64.b64encode(dn.encode('utf-8')).decode('utf-8')
+
             node = {
-                'id': entry.distinguishedName.value, # DN completo
-                'cn': node_name, # Apenas o CN
+                'id': b64_id,
+                'dn': dn,
                 'text': node_name,
             }
             if children:

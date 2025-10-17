@@ -18,19 +18,19 @@ const transformToTreeData = (apiData) => {
     const tree = [];
     let parentCounter = 0;
 
-    const traverse = (node, parentCn) => {
+    const traverse = (node, parentId) => {
         tree.push({
-            id: node.cn, // Usa o CN como ID
-            parent: parentCn,
+            id: node.id, // ID já está em Base64
+            parent: parentId,
             droppable: true,
             text: node.text,
-            data: { // Armazena o DN completo para quando precisarmos dele
-                dn: node.id
+            data: { // Armazena o DN completo
+                dn: node.dn
             }
         });
 
         if (node.children) {
-            node.children.forEach(child => traverse(child, node.cn));
+            node.children.forEach(child => traverse(child, node.id));
         }
     };
 
@@ -123,8 +123,8 @@ const OUManagement = () => {
     };
 
     const handleSearchResult = (data) => {
-        // Simplesmente seleciona a OU encontrada.
-        onSelectOU(data.ou_dn, data.ou_path.split(' --- ').pop());
+        // A função fetchUsers espera o DN e o nome da OU
+        fetchUsers(data.ou_dn, data.ou_path.split(' --- ').pop());
     };
 
     if (loading) {

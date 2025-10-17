@@ -5,8 +5,8 @@ import { ItemTypes } from './UserList.jsx';
 const OUTree = ({ treeData, onSelectOU, onMoveUser }) => {
 
     // A função onMoveUser espera o DN da OU, que está em `dropTarget.data.dn`
-    const handleDrop = (newTreeData, { dragSourceId, dropTargetId, dropTarget }) => {
-        if (dropTarget && dropTarget.data && dropTarget.data.dn) {
+    const handleDrop = (newTreeData, { dragSourceId, dropTarget }) => {
+        if (dropTarget?.data?.dn) {
             onMoveUser(dragSourceId, dropTarget.data.dn);
         } else {
             console.error("Não foi possível mover o usuário: DN da OU de destino não encontrado.");
@@ -21,7 +21,7 @@ const OUTree = ({ treeData, onSelectOU, onMoveUser }) => {
                 <div
                     style={{ marginLeft: depth * 10 }}
                     className="ou-node"
-                    // Ao selecionar, passamos o DN e o CN (texto)
+                    // Ao selecionar, passamos o DN e o texto
                     onClick={() => onSelectOU(node.data.dn, node.text)}
                 >
                     {node.droppable && (
