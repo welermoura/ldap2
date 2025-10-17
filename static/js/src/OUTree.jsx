@@ -1,18 +1,16 @@
-import React, { useState, useRef, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useRef, useImperativeHandle, forwardRef, useEffect, useCallback } from 'react';
 import { useDrop } from 'react-dnd';
 import { ItemTypes } from './UserList.jsx';
 
-const OUNode = ({ node, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
-    // Um nó está aberto se seu caminho estiver no conjunto de caminhos abertos.
+const OUNode = forwardRef(({ node, onSelectOU, onMoveUser, openPaths, onToggleNode }, ref) => {
     const isOpen = openPaths.has(node.id);
-    const ref = useRef(null);
 
     const [{ canDrop, isOver }, drop] = useDrop(() => ({
         accept: ItemTypes.USER,
         drop: (item) => onMoveUser(item.id, node.id),
-        hover: (item, monitor) => {
+        hover: () => {
             if (!isOpen) {
-                setOpenPaths(prev => new Set(prev).add(node.id));
+                onToggleNode(node.id);
             }
         },
         collect: (monitor) => ({
@@ -21,25 +19,15 @@ const OUNode = ({ node, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
         }),
     }));
 
-    drop(ref);
-
     const hasChildren = node.children && node.children.length > 0;
-
-    const handleToggle = () => {
-        setOpenPaths(prev => {
-            const newPaths = new Set(prev);
-            if (newPaths.has(node.id)) {
-                newPaths.delete(node.id);
-            } else {
-                newPaths.add(node.id);
-            }
-            return newPaths;
-        });
-    };
 
     const handleSelect = (e) => {
         e.stopPropagation();
         onSelectOU(node.id, node.text);
+    };
+
+    const handleToggle = () => {
+        onToggleNode(node.id);
     };
 
     let backgroundColor = 'transparent';
@@ -48,7 +36,7 @@ const OUNode = ({ node, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
     }
 
     return (
-        <div ref={ref} style={{ marginLeft: '20px', backgroundColor, borderRadius: '4px' }}>
+        <div ref={drop} style={{ marginLeft: '20px', backgroundColor, borderRadius: '4px' }}>
             <div className="ou-node" style={{ cursor: 'pointer', padding: '5px' }}>
                 {hasChildren && (
                     <i className={`fas ${isOpen ? 'fa-caret-down' : 'fa-caret-right'} me-2`} onClick={handleToggle}></i>
@@ -58,49 +46,75 @@ const OUNode = ({ node, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
             </div>
             {isOpen && hasChildren && (
                 <div style={{ borderLeft: '1px solid var(--glass-border-color)', marginLeft: '10px' }}>
-                    <OUTreeInner treeData={node.children} onSelectOU={onSelectOU} onMoveUser={onMoveUser} openPaths={openPaths} setOpenPaths={setOpenPaths} />
+                    {node.children.map(childNode => (
+                        <OUNode
+                            key={childNode.id}
+                            node={childNode}
+                            onSelectOU={onSelectOU}
+                            onMoveUser={onMoveUser}
+                            openPaths={openPaths}
+                            onToggleNode={onToggleNode}
+                        />
+                    ))}
                 </div>
             )}
         </div>
     );
-};
-
-// Separamos o componente interno para o forwardRef funcionar corretamente
-const OUTreeInner = ({ treeData, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
-    return (
-        <div>
-            {treeData.map(node => (
-                <OUNode key={node.id} node={node} onSelectOU={onSelectOU} onMoveUser={onMoveUser} openPaths={openPaths} setOpenPaths={setOpenPaths} />
-            ))}
-        </div>
-    );
-};
+});
 
 const OUTree = forwardRef(({ treeData, onSelectOU, onMoveUser }, ref) => {
-    const [openPaths, setOpenPaths] = useState(() => {
-        const initialOpen = new Set();
-        if (treeData && treeData.length > 0) {
-            initialOpen.add(treeData[0].id); // Começa com o nó raiz aberto
+    const [openPaths, setOpenPaths] = useState(new Set());
+
+    useEffect(() => {
+        // Abre o nó raiz por padrão quando os dados da árvore são carregados pela primeira vez
+        if (treeData && treeData.length > 0 && openPaths.size === 0) {
+            setOpenPaths(new Set([treeData[0].id]));
         }
-        return initialOpen;
-    });
+    }, [treeData]); // Depende apenas de treeData
+
+    const handleToggleNode = useCallback((nodeId) => {
+        setOpenPaths(prevPaths => {
+            const newPaths = new Set(prevPaths);
+            if (newPaths.has(nodeId)) {
+                newPaths.delete(nodeId);
+            } else {
+                newPaths.add(nodeId);
+            }
+            return newPaths;
+        });
+    }, []); // A função em si não muda
 
     useImperativeHandle(ref, () => ({
         navigateToOU: (ou_dn) => {
-            // Lógica para abrir a árvore até a OU e selecioná-la
             const dnParts = ou_dn.split(',');
             const pathsToOpen = new Set();
             for (let i = 0; i < dnParts.length; i++) {
                 pathsToOpen.add(dnParts.slice(i).join(','));
             }
             setOpenPaths(prev => new Set([...prev, ...pathsToOpen]));
-            onSelectOU(ou_dn, dnParts[0].split('=')[1]);
+            // Seleciona a OU após um pequeno atraso para garantir que ela esteja visível
+            setTimeout(() => onSelectOU(ou_dn, dnParts[0].split('=')[1]), 100);
         }
-    }));
+    }), [onSelectOU]); // Depende de onSelectOU
 
-    if (!treeData || treeData.length === 0) return null;
+    if (!treeData || treeData.length === 0) {
+        return <div className="text-center text-muted p-4">Nenhuma Unidade Organizacional encontrada.</div>;
+    }
 
-    return <OUTreeInner treeData={treeData} onSelectOU={onSelectOU} onMoveUser={onMoveUser} openPaths={openPaths} setOpenPaths={setOpenPaths} />;
+    return (
+        <div>
+            {treeData.map(node => (
+                <OUNode
+                    key={node.id}
+                    node={node}
+                    onSelectOU={onSelectOU}
+                    onMoveUser={onMoveUser}
+                    openPaths={openPaths}
+                    onToggleNode={handleToggleNode}
+                />
+            ))}
+        </div>
+    );
 });
 
 export default OUTree;

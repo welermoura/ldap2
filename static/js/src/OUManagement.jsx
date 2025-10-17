@@ -6,7 +6,6 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import OUTree from './OUTree.jsx';
 import UserList from './UserList.jsx';
 import SearchUser from './SearchUser.jsx';
-import ErrorBoundary from './ErrorBoundary.jsx';
 
 // Pega o token CSRF do meta tag
 const getCsrfToken = () => {
@@ -114,14 +113,12 @@ const OUManagement = () => {
                             <h5 className="mb-0"><i className="fas fa-sitemap me-2"></i>Estrutura do Active Directory</h5>
                         </div>
                         <div className="card-body tree-container">
-                            <ErrorBoundary>
-                                <OUTree
-                                    treeData={ouTree}
-                                    onSelectOU={fetchUsers}
-                                    onMoveUser={handleMoveUser}
-                                    ref={setOuTreeRef} // Passa a ref para o componente filho
-                                />
-                            </ErrorBoundary>
+                            <OUTree
+                                treeData={ouTree}
+                                onSelectOU={fetchUsers}
+                                onMoveUser={handleMoveUser}
+                                ref={setOuTreeRef} // Passa a ref para o componente filho
+                            />
                         </div>
                     </div>
                 </div>
