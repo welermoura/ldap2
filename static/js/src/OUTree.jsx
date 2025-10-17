@@ -1,26 +1,28 @@
 import React from "react";
 import { Tree } from "@minoru/react-dnd-treeview";
-import { ItemTypes } from './UserList.jsx'; // Reutilizamos a definição de tipo
+import { ItemTypes } from './UserList.jsx';
 
 const OUTree = ({ treeData, onSelectOU, onMoveUser }) => {
 
-    // A função onMoveUser já está no formato correto para o `onDrop` da árvore.
-    // Ela espera o nó (usuário) e o novo pai (OU).
-    const handleDrop = (newTreeData, { dragSourceId, dropTargetId }) => {
-        // dragSourceId é o ID do usuário (item.id)
-        // dropTargetId é o ID da OU (node.id)
-        onMoveUser(dragSourceId, dropTargetId);
+    // A função onMoveUser espera o DN da OU, que está em `dropTarget.data.dn`
+    const handleDrop = (newTreeData, { dragSourceId, dropTargetId, dropTarget }) => {
+        if (dropTarget && dropTarget.data && dropTarget.data.dn) {
+            onMoveUser(dragSourceId, dropTarget.data.dn);
+        } else {
+            console.error("Não foi possível mover o usuário: DN da OU de destino não encontrado.");
+        }
     };
 
     return (
         <Tree
             treeData={treeData}
-            rootId={0} // Um ID raiz virtual, já que podemos ter múltiplas bases
+            rootId={0}
             render={(node, { depth, isOpen, onToggle }) => (
                 <div
                     style={{ marginLeft: depth * 10 }}
                     className="ou-node"
-                    onClick={() => onSelectOU(node.id, node.text)}
+                    // Ao selecionar, passamos o DN e o CN (texto)
+                    onClick={() => onSelectOU(node.data.dn, node.text)}
                 >
                     {node.droppable && (
                         <span onClick={(e) => { e.stopPropagation(); onToggle(); }}>
@@ -37,13 +39,7 @@ const OUTree = ({ treeData, onSelectOU, onMoveUser }) => {
                 </div>
             )}
             onDrop={handleDrop}
-            // Mapeia o tipo de arrastar do nosso UserList para a árvore
-            canDrop={(tree, { dragSource }) => {
-                if (dragSource && dragSource.type === ItemTypes.USER) {
-                    return true;
-                }
-            }}
-            // Define o tipo de item que pode ser arrastado para a árvore
+            canDrop={(tree, { dragSource }) => dragSource?.type === ItemTypes.USER}
             dropTarget={{
                 "type": ItemTypes.USER,
                 "resolve": "manual"
