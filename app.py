@@ -815,11 +815,11 @@ def manage_users():
 @require_permission(action='can_move_users')
 def ou_management():
     """
-    Renderiza a página de gerenciamento de OUs com a árvore interativa.
+    Renderiza a página de gerenciamento de OUs, que agora é controlada pelo React.
     """
-    # Passa um formulário vazio para que o token CSRF esteja disponível no template
+    # Embora o formulário não seja mais exibido, ainda precisamos dele para gerar o token CSRF.
     form = FlaskForm()
-    return render_template('ou_management.html', form=form)
+    return render_template('ou_management.html', csrf_token=form.csrf_token)
 
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
