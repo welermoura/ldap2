@@ -1,6 +1,6 @@
 import React, { useState, useRef, useImperativeHandle, forwardRef } from 'react';
 import { useDrop } from 'react-dnd';
-import { ItemTypes } from './UserList';
+import { ItemTypes } from './UserList.jsx';
 
 const OUNode = ({ node, onSelectOU, onMoveUser, openPaths, setOpenPaths }) => {
     // Um nó está aberto se seu caminho estiver no conjunto de caminhos abertos.

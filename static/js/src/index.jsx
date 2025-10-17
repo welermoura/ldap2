@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import OUManagement from './OUManagement';
+import OUManagement from './OUManagement.jsx';
 
 const container = document.getElementById('react-ou-management-root');
 if (container) {

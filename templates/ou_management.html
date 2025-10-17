@@ -11,17 +11,27 @@
 {% block content %}
     {# Este é o ponto de entrada para a nossa aplicação React. #}
     <div id="react-ou-management-root">
-        <div class="text-center p-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Carregando aplicação...</span>
-            </div>
-            <p class="mt-2">Carregando aplicação...</p>
-        </div>
+        {# O React irá substituir este conteúdo. #}
     </div>
 {% endblock %}
 
 {% block scripts %}
     {{ super() }}
-    {# Carrega o nosso bundle JavaScript compilado pelo Webpack. #}
-    <script src="{{ url_for('static', filename='js/dist/bundle.js') }}"></script>
+
+    {# Lógica para carregar os scripts do Vite #}
+    {% if config.get('ENV') == 'development' %}
+        <!-- Em desenvolvimento, carrega o cliente Vite e o nosso ponto de entrada. -->
+        <script type="module">
+            import RefreshRuntime from 'http://localhost:5173/@react-refresh'
+            RefreshRuntime.injectIntoGlobalHook(window)
+            window.$RefreshReg$ = () => {}
+            window.$RefreshSig$ = () => (type) => type
+            window.__vite_plugin_react_preamble_installed__ = true
+        </script>
+        <script type="module" src="http://localhost:5173/@vite/client"></script>
+        <script type="module" src="http://localhost:5173/static/js/src/index.js"></script>
+    {% else %}
+        <!-- Em produção, carrega o bundle compilado. -->
+        <script type="module" src="{{ url_for('static', filename='js/dist/bundle.js') }}"></script>
+    {% endif %}
 {% endblock %}

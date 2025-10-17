@@ -2,6 +2,9 @@
 import os
 import logging
 from flask import Flask, render_template, request, flash, redirect, url_for, session, jsonify, Response
+from dotenv import load_dotenv
+
+load_dotenv() # Carrega as variáveis de ambiente do arquivo .env
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, BooleanField
 from wtforms.validators import DataRequired, ValidationError, Length, EqualTo
@@ -275,6 +278,12 @@ def inject_attr_value_getter():
 @app.context_processor
 def inject_permission_checker():
     return dict(check_permission=check_permission)
+
+@app.context_processor
+def inject_csrf_token():
+    # Disponibiliza o token CSRF para todos os templates
+    from flask_wtf.csrf import generate_csrf
+    return dict(csrf_token=generate_csrf)
 
 # ==============================================================================
 # Validadores Customizados e Funções Auxiliares (sem alteração)
@@ -816,10 +825,9 @@ def manage_users():
 def ou_management():
     """
     Renderiza a página de gerenciamento de OUs, que agora é controlada pelo React.
+    O token CSRF é injetado automaticamente pelo context_processor.
     """
-    # Embora o formulário não seja mais exibido, ainda precisamos dele para gerar o token CSRF.
-    form = FlaskForm()
-    return render_template('ou_management.html', csrf_token=form.csrf_token)
+    return render_template('ou_management.html')
 
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
