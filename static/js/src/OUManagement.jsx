@@ -28,21 +28,14 @@ const OUManagement = () => {
     };
 
     useEffect(() => {
-        console.log("Iniciando busca da árvore de OUs no frontend...");
         axios.get('/api/ou_tree')
             .then(response => {
-                console.log("Dados da árvore recebidos no frontend:", JSON.stringify(response.data, null, 2));
-                if (response.data.length === 0) {
-                    console.warn("API retornou uma árvore vazia.");
-                    showAlert("A estrutura de OUs está vazia ou não pôde ser carregada.", "warning");
-                }
                 setOuTree(response.data);
                 setLoading(false);
             })
             .catch(err => {
-                const errorData = err.response ? err.response.data : { error: "Erro de rede ou CORS." };
-                console.error("Erro detalhado ao buscar a árvore de OUs:", JSON.stringify(errorData, null, 2));
-                showAlert(`Erro ao carregar estrutura: ${errorData.error || "Verifique o console para detalhes."}`, "danger");
+                console.error("Erro ao buscar a árvore de OUs:", err);
+                showAlert("Não foi possível carregar a estrutura de OUs.", "danger");
                 setLoading(false);
             });
     }, []);

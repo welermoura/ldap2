@@ -31,7 +31,14 @@
         <script type="module" src="http://localhost:5173/@vite/client"></script>
         <script type="module" src="http://localhost:5173/static/js/src/index.js"></script>
     {% else %}
-        <!-- Em produção, carrega o bundle compilado. -->
-        <script type="module" src="{{ url_for('static', filename='js/dist/bundle.js') }}"></script>
+        <!-- Em produção, carrega o bundle compilado dinamicamente pelo manifest.json. -->
+        {% if vite_js_path %}
+            <script type="module" src="{{ vite_js_path }}"></script>
+        {% else %}
+            <!-- Fallback ou mensagem de erro se o manifest não puder ser lido -->
+            <script>
+                console.error("Erro: O arquivo de manifesto do Vite não foi encontrado ou não pôde ser lido. Execute o build do frontend.");
+            </script>
+        {% endif %}
     {% endif %}
 {% endblock %}
