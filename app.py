@@ -406,8 +406,7 @@ def get_ldap_connection(user, password):
     if not ad_server:
         raise Exception("Servidor AD não configurado.")
     server = Server(ad_server, use_ssl=use_ldaps, get_info=ALL)
-    # Adicionado auto_referrals=True para seguir referências LDAP, útil para estruturas de floresta AD complexas.
-    return Connection(server, user=user, password=password, auto_bind=True, auto_referrals=True)
+    return Connection(server, user=user, password=password, auto_bind=True)
 
 def get_service_account_connection():
     config = load_config()
@@ -809,17 +808,6 @@ def manage_users():
         except Exception as e:
             flash(f"Erro ao conectar ou buscar usuários: {e}", "error")
     return render_template('manage_users.html', form=form, users=users)
-
-@app.route('/ou_management')
-@require_auth
-@require_permission(action='can_move_users')
-def ou_management():
-    """
-    Renderiza a página de gerenciamento de OUs com a árvore interativa.
-    """
-    # Passa um formulário vazio para que o token CSRF esteja disponível no template
-    form = FlaskForm()
-    return render_template('ou_management.html', form=form)
 
 @app.route('/group_management', methods=['GET', 'POST'])
 @require_auth
@@ -1623,182 +1611,6 @@ def edit_user(username):
         return redirect(url_for('manage_users'))
 
 # ==============================================================================
-# API e Rotas para Gerenciamento de OUs
-# ==============================================================================
-def build_ou_tree(conn, base_dn):
-    """
-    Constrói recursivamente uma árvore de OUs a partir de uma base DN.
-    """
-    tree = []
-    try:
-        # Busca por OUs e Containers diretamente sob a base_dn
-        conn.search(base_dn, '(|(objectClass=organizationalUnit)(objectClass=container))',
-                    search_scope=ldap3.LEVEL, attributes=['ou', 'cn', 'distinguishedName'])
-
-        # Ordena as entradas para uma exibição consistente
-        sorted_entries = sorted(conn.entries, key=lambda e: e.entry_dn)
-
-        for entry in sorted_entries:
-            # O nome do nó pode ser 'ou' ou 'cn' (para containers como 'Users')
-            node_name = get_attr_value(entry, 'ou') or get_attr_value(entry, 'cn')
-            node = {
-                'id': entry.distinguishedName.value,
-                'text': node_name,
-                'children': build_ou_tree(conn, entry.distinguishedName.value)
-            }
-            tree.append(node)
-    except ldap3.core.exceptions.LDAPInvalidDnError:
-        # Ignora DNs inválidos que podem aparecer em algumas configurações
-        pass
-    except Exception as e:
-        logging.error(f"Erro ao construir a árvore de OUs para a base '{base_dn}': {e}")
-    return tree
-
-@app.route('/api/ou_tree')
-@require_auth
-@require_api_permission(action='can_move_users')
-def api_ou_tree():
-    """
-    Retorna a estrutura de OUs do Active Directory em formato de árvore (JSON).
-    """
-    try:
-        conn = get_read_connection()
-        config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
-
-        if not search_base:
-            return jsonify({'error': 'A Base de Busca AD não está configurada.'}), 500
-
-        # O nó raiz da árvore será a própria base de busca
-        base_name = search_base.split(',')[0].split('=')[1]
-        tree = [{
-            'id': search_base,
-            'text': base_name,
-            'state': {'opened': True}, # Começa com o nó raiz aberto
-            'children': build_ou_tree(conn, search_base)
-        }]
-
-        return jsonify(tree)
-    except Exception as e:
-        logging.error(f"Erro na API /api/ou_tree: {e}", exc_info=True)
-        return jsonify({'error': f'Falha ao carregar a árvore de OUs: {str(e)}'}), 500
-
-@app.route('/api/ou_users/<path:ou_dn>')
-@require_auth
-@require_api_permission(action='can_move_users')
-def ou_users(ou_dn):
-    """
-    Lista os usuários de uma OU específica.
-    """
-    try:
-        conn = get_read_connection()
-        # Busca por usuários diretamente dentro da OU especificada (não recursivo)
-        conn.search(ou_dn, '(objectClass=user)', search_scope=ldap3.LEVEL,
-                    attributes=['sAMAccountName', 'displayName', 'title'])
-
-        users = []
-        for entry in conn.entries:
-            users.append({
-                'id': get_attr_value(entry, 'sAMAccountName'),
-                'text': get_attr_value(entry, 'displayName') or get_attr_value(entry, 'sAMAccountName'),
-                'title': get_attr_value(entry, 'title'),
-                'icon': 'fa fa-user text-primary' # Ícone para diferenciar de OUs
-            })
-
-        # Ordena os usuários por nome de exibição
-        sorted_users = sorted(users, key=lambda u: u.get('text', '').lower())
-        return jsonify(sorted_users)
-
-    except Exception as e:
-        logging.error(f"Erro ao listar usuários da OU '{ou_dn}': {e}", exc_info=True)
-        return jsonify({'error': f'Falha ao listar usuários: {str(e)}'}), 500
-
-@app.route('/api/search_user_location', methods=['POST'])
-@require_auth
-@require_api_permission(action='can_move_users')
-def search_user_location():
-    """
-    Busca um usuário e retorna sua localização (OU DN) e o caminho.
-    """
-    data = request.get_json()
-    search_query = data.get('query')
-    if not search_query:
-        return jsonify({'error': 'Termo de busca não fornecido.'}), 400
-
-    try:
-        conn = get_read_connection()
-        # Usamos a função de busca geral que já existe
-        users = search_general_users(conn, search_query)
-
-        if not users:
-            return jsonify({'error': 'Nenhum usuário encontrado.'}), 404
-
-        # Retorna o primeiro usuário encontrado
-        user = users[0]
-        user_dn = user.entry_dn
-        ou_dn = get_ou_from_dn(user_dn)
-
-        return jsonify({
-            'user_sam': get_attr_value(user, 'sAMAccountName'),
-            'user_dn': user_dn,
-            'ou_dn': ou_dn,
-            'ou_path': get_ou_path(user_dn)
-        })
-
-    except Exception as e:
-        logging.error(f"Erro ao buscar localização do usuário com a query '{search_query}': {e}", exc_info=True)
-        return jsonify({'error': f'Falha ao buscar usuário: {str(e)}'}), 500
-
-@app.route('/api/move_user', methods=['POST'])
-@require_auth
-@require_api_permission(action='can_move_users')
-def move_user():
-    """
-    Move um usuário para uma nova Unidade Organizacional.
-    """
-    data = request.get_json()
-    user_sam = data.get('user_sam')
-    target_ou_dn = data.get('target_ou_dn')
-
-    if not user_sam or not target_ou_dn:
-        return jsonify({'error': 'Parâmetros inválidos fornecidos.'}), 400
-
-    try:
-        # Usar a conta de serviço para a operação de escrita (movimentação)
-        conn = get_service_account_connection()
-
-        # Encontrar o usuário para obter seu DN atual e o RDN (Relative Distinguished Name)
-        user = get_user_by_samaccountname(conn, user_sam, ['cn', 'distinguishedName'])
-        if not user:
-            return jsonify({'error': 'Usuário não encontrado.'}), 404
-
-        current_dn = user.entry_dn
-        # O RDN é a primeira parte do DN, geralmente 'CN=Nome do Usuario'
-        rdn = current_dn.split(',')[0]
-
-        # Executa a operação de renomeação de DN, que efetivamente move o objeto
-        conn.modify_dn(current_dn, rdn, new_superior=target_ou_dn)
-
-        if conn.result['result'] == 0: # 0 indica sucesso em operações LDAP
-            new_dn = f"{rdn},{target_ou_dn}"
-            log_message = (
-                f"Usuário '{user_sam}' movido por '{session.get('user_display_name')}' "
-                f"de '{get_ou_from_dn(current_dn)}' para '{target_ou_dn}'. "
-                f"DN antigo: {current_dn}, DN novo: {new_dn}"
-            )
-            logging.info(log_message)
-            return jsonify({'success': True, 'message': 'Usuário movido com sucesso!'})
-        else:
-            # Se o resultado não for sucesso, loga a mensagem de erro do servidor LDAP
-            error_message = conn.result.get('message', 'Erro desconhecido do servidor LDAP.')
-            logging.error(f"Falha ao mover usuário '{user_sam}': {error_message}")
-            return jsonify({'error': f'Falha ao mover o usuário: {error_message}'}), 500
-
-    except Exception as e:
-        logging.error(f"Erro na API /api/move_user para o usuário '{user_sam}': {e}", exc_info=True)
-        return jsonify({'error': f'Ocorreu um erro inesperado: {str(e)}'}), 500
-
-# ==============================================================================
 # Rotas Apenas para Admin
 # ==============================================================================
 @app.route('/admin/register', methods=['GET', 'POST'])
@@ -1981,7 +1793,6 @@ def permissions():
                         'can_reset_password': f'{group}_can_reset_password' in request.form,
                         'can_edit': f'{group}_can_edit' in request.form,
                         'can_manage_groups': f'{group}_can_manage_groups' in request.form,
-                        'can_move_users': f'{group}_can_move_users' in request.form,
                         'can_delete_user': f'{group}_can_delete_user' in request.form,
                     }
                     views = {
