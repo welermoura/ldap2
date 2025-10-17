@@ -138,15 +138,11 @@ $(function () {
                 'responsive': true,
                 'stripes': true
             },
-            // check_callback agora valida a operação de DND de fora da árvore
-            'check_callback': function (operation, node, node_parent, node_position, more) {
-                if (operation === 'move_node' || operation === 'copy_node') {
-                    // Impede que nós da própria árvore sejam arrastados
-                    return false;
-                }
-                // Permite o drop de elementos externos
-                return true;
-            }
+            // Permite que operações de DND (arrastar e soltar) aconteçam na árvore.
+            // A lógica para prevenir que nós da árvore sejam arrastados está no plugin 'dnd'
+            // com a configuração 'is_draggable': false. O evento 'dnd_stop.vakata'
+            // lida com a lógica de mover o usuário.
+            'check_callback': true
         },
         'dnd': {
             'open_timeout': 500, // Expande a OU após 500ms de hover
