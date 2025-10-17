@@ -3,7 +3,7 @@ import axios from 'axios';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
-import OUTree from './OUTree.jsx';
+import ReactTreeView from './ReactTreeView.jsx';
 import UserList from './UserList.jsx';
 import SearchUser from './SearchUser.jsx';
 
@@ -113,11 +113,11 @@ const OUManagement = () => {
                             <h5 className="mb-0"><i className="fas fa-sitemap me-2"></i>Estrutura do Active Directory</h5>
                         </div>
                         <div className="card-body tree-container">
-                            <OUTree
+                            <ReactTreeView
                                 treeData={ouTree}
                                 onSelectOU={fetchUsers}
                                 onMoveUser={handleMoveUser}
-                                ref={setOuTreeRef} // Passa a ref para o componente filho
+                                ref={setOuTreeRef}
                             />
                         </div>
                     </div>
