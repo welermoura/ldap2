@@ -13,6 +13,37 @@ const getCsrfToken = () => {
     return tokenTag ? tokenTag.getAttribute('content') : '';
 };
 
+// Função para transformar os dados da API no formato esperado pela biblioteca da árvore
+const transformToTreeData = (apiData) => {
+    const tree = [];
+    let parentCounter = 0;
+
+    const traverse = (node, parentId) => {
+        tree.push({
+            id: node.id,
+            parent: parentId,
+            droppable: true, // Todas as OUs podem receber usuários
+            text: node.text,
+        });
+
+        if (node.children) {
+            node.children.forEach(child => traverse(child, node.id));
+        }
+    };
+
+    apiData.forEach(rootNode => {
+        // Adiciona um nó raiz virtual se houver múltiplos, ou usa 0
+        const rootParentId = apiData.length > 1 ? `virtual-root-${parentCounter++}` : 0;
+        if(apiData.length > 1) {
+            tree.push({ id: rootParentId, parent: 0, text: "Raiz Virtual", droppable: false });
+        }
+        traverse(rootNode, rootParentId);
+    });
+
+    return tree;
+};
+
+
 const OUManagement = () => {
     const [ouTree, setOuTree] = useState([]);
     const [selectedOU, setSelectedOU] = useState({ dn: null, name: null });
@@ -20,8 +51,6 @@ const OUManagement = () => {
     const [loading, setLoading] = useState(true);
     const [loadingUsers, setLoadingUsers] = useState(false);
     const [alert, setAlert] = useState({ show: false, message: '', type: 'info' });
-    const [ouTreeRef, setOuTreeRef] = useState(null); // Ref para o componente da árvore
-
     const showAlert = (message, type = 'info', duration = 5000) => {
         setAlert({ show: true, message, type });
         setTimeout(() => setAlert({ show: false, message: '', type: 'info' }), duration);
@@ -30,7 +59,8 @@ const OUManagement = () => {
     useEffect(() => {
         axios.get('/api/ou_tree')
             .then(response => {
-                setOuTree(response.data);
+                const formattedTree = transformToTreeData(response.data);
+                setOuTree(formattedTree);
                 setLoading(false);
             })
             .catch(err => {
@@ -80,6 +110,7 @@ const OUManagement = () => {
         });
     }, []);
 
+    // A nova árvore não precisa de navegação imperativa, a seleção direta funciona.
     const handleSearchUser = (query) => {
         const csrfToken = getCsrfToken();
         return axios.post('/api/search_user_location', { query }, {
@@ -88,9 +119,8 @@ const OUManagement = () => {
     };
 
     const handleSearchResult = (data) => {
-        if (ouTreeRef) {
-            ouTreeRef.navigateToOU(data.ou_dn);
-        }
+        // Simplesmente seleciona a OU encontrada.
+        onSelectOU(data.ou_dn, data.ou_path.split(' --- ').pop());
     };
 
     if (loading) {
@@ -117,7 +147,6 @@ const OUManagement = () => {
                                 treeData={ouTree}
                                 onSelectOU={fetchUsers}
                                 onMoveUser={handleMoveUser}
-                                ref={setOuTreeRef}
                             />
                         </div>
                     </div>
