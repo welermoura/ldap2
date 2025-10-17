@@ -116,3 +116,6 @@ dmypy.json
 # Application-specific secret keys
 data/secret.key
 data/flask_secret.key
+
+# Node.js dependencies
+node_modules/

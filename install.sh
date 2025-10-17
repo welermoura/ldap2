@@ -28,9 +28,29 @@ else
     $PYTHON_EXEC -m venv $VENV_DIR
 fi
 
-# --- Install Dependencies ---
+# --- Install Python Dependencies ---
 echo "Installing dependencies from requirements.txt into the virtual environment..."
 $VENV_DIR/bin/pip install -r requirements.txt
+
+# --- Install Node.js Dependencies ---
+if command -v npm &> /dev/null; then
+    echo "Found 'npm' in PATH. Installing Node.js dependencies..."
+    npm install
+else
+    echo "Warning: 'npm' could not be found. Skipping Node.js dependency installation."
+    echo "Please install Node.js and npm to build the frontend."
+fi
+
+# --- Build Frontend ---
+if command -v npm &> /dev/null; then
+    echo "Building frontend assets..."
+    if npm run build; then
+        echo "Frontend build successful."
+    else
+        echo "Error: Frontend build failed. Please check the logs."
+        exit 1
+    fi
+fi
 
 # --- Final Instructions ---
 echo ""
@@ -45,7 +65,7 @@ echo ""
 echo "----------------------------------------"
 echo "--- Starting Application Server now... ---"
 echo "--- Press CTRL+C to stop the server. ---"
-"----------------------------------------"
+echo "----------------------------------------"
 
 # --- Launch Application ---
 $VENV_DIR/bin/python -m flask run
