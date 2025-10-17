@@ -1668,27 +1668,54 @@ def build_ou_tree(conn, base_dn):
 def api_ou_tree():
     """
     Retorna a estrutura de OUs do Active Directory em formato de árvore (JSON).
+    Agora suporta múltiplas bases de busca.
     """
     try:
         conn = get_read_connection()
         config = load_config()
-        search_base = config.get('AD_SEARCH_BASE')
+        search_bases = config.get('AD_SEARCH_BASE')
 
-        if not search_base:
+        if not search_bases:
             return jsonify({'error': 'A Base de Busca AD não está configurada.'}), 500
 
-        # O nó raiz da árvore será a própria base de busca
-        base_name = search_base.split(',')[0].split('=')[1]
-        tree = [{
-            'id': search_base,
-            'text': base_name,
-            'state': {'opened': True}, # Começa com o nó raiz aberto
-            'children': build_ou_tree(conn, search_base)
-        }]
+        # Garante que search_bases seja sempre uma lista para consistência
+        if isinstance(search_bases, str):
+            search_bases = [search_bases]
+
+        tree = []
+        for base_dn in search_bases:
+            try:
+                # O nó raiz da árvore será a própria base de busca
+                # Ex: de 'OU=Escritorios,DC=empresa,DC=com' pega 'Escritorios'
+                base_name = base_dn.split(',')[0].split('=')[1]
+                root_node = {
+                    'id': base_dn,
+                    'text': base_name,
+                    'state': {'opened': True},  # Começa com o nó raiz aberto
+                    'children': build_ou_tree(conn, base_dn)
+                }
+                tree.append(root_node)
+            except IndexError:
+                logging.error(f"Formato inválido para a base de busca: '{base_dn}'. Pulando.")
+                continue  # Pula DNs malformados
+            except Exception as e:
+                # Adiciona um nó de erro à árvore para feedback visual no frontend
+                logging.error(f"Erro ao processar a base de busca '{base_dn}': {e}")
+                try:
+                    base_name_fallback = base_dn.split(',')[0].split('=')[1]
+                except Exception:
+                    base_name_fallback = "desconhecida"
+
+                tree.append({
+                    'id': base_dn,
+                    'text': f"Erro ao carregar base '{base_name_fallback}'",
+                    'state': {'disabled': True},
+                    'icon': 'fa fa-exclamation-triangle text-danger'
+                })
 
         return jsonify(tree)
     except Exception as e:
-        logging.error(f"Erro na API /api/ou_tree: {e}", exc_info=True)
+        logging.error(f"Erro geral na API /api/ou_tree: {e}", exc_info=True)
         return jsonify({'error': f'Falha ao carregar a árvore de OUs: {str(e)}'}), 500
 
 @app.route('/api/ou_users/<path:ou_dn>')
