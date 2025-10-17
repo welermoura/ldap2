@@ -31,14 +31,15 @@ const transformToTreeData = (apiData) => {
         }
     };
 
-    apiData.forEach(rootNode => {
-        // Adiciona um nó raiz virtual se houver múltiplos, ou usa 0
-        const rootParentId = apiData.length > 1 ? `virtual-root-${parentCounter++}` : 0;
-        if(apiData.length > 1) {
-            tree.push({ id: rootParentId, parent: 0, text: "Raiz Virtual", droppable: false });
-        }
-        traverse(rootNode, rootParentId);
-    });
+    // Se houver apenas uma base de busca, seu pai é 0 (a raiz do canvas da árvore)
+    if (apiData.length === 1) {
+        traverse(apiData[0], 0);
+    } else {
+    // Se houver múltiplas bases, elas se tornam os nós de nível superior
+        apiData.forEach(rootNode => {
+            traverse(rootNode, 0);
+        });
+    }
 
     return tree;
 };
