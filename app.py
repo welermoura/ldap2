@@ -285,28 +285,6 @@ def inject_csrf_token():
     from flask_wtf.csrf import generate_csrf
     return dict(csrf_token=generate_csrf)
 
-@app.context_processor
-def inject_vite_assets():
-    """
-    Injects Vite asset paths into the template context for production builds.
-    """
-    manifest_path = os.path.join(app.static_folder, 'js', 'dist', '.vite', 'manifest.json')
-    vite_js_path = ''
-    try:
-        with open(manifest_path, 'r') as f:
-            manifest = json.load(f)
-            # The key is the original entry point file name as defined in vite.config.mjs
-            entry_point = 'static/js/src/index.jsx'
-            if entry_point in manifest:
-                # Get the final file path from the manifest
-                vite_js_path = url_for('static', filename=f"js/dist/{manifest[entry_point]['file']}")
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Manifest not found, which is expected in development mode when Vite serves assets.
-        # The template logic will handle this.
-        pass
-
-    return dict(vite_js_path=vite_js_path)
-
 # ==============================================================================
 # Validadores Customizados e Funções Auxiliares (sem alteração)
 # ==============================================================================
