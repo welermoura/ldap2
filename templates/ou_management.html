@@ -138,12 +138,15 @@ $(function () {
                 'responsive': true,
                 'stripes': true
             },
+            // check_callback é a chave para permitir o drop de elementos externos.
+            // Esta função é chamada antes de qualquer modificação na árvore.
             'check_callback': function (operation, node, node_parent, node_position, more) {
+                // Se a operação for 'move_node' (que é o que o DND aciona)...
                 if (operation === "move_node") {
-                    // Permite o drop se o elemento arrastado for de fora da árvore (is_foreign)
-                    return more.dnd ? more.is_foreign : false;
+                    // ...só permita se for um evento de DND e o item for "estrangeiro" (de fora da árvore).
+                    return more.dnd && more.is_foreign;
                 }
-                // Permite outras operações (como criar, renomear, etc.)
+                // Para qualquer outra operação (criar, renomear, etc.), permita.
                 return true;
             }
         },
@@ -189,48 +192,26 @@ $(function () {
             });
     });
 
-    // --- Lógica de Arrastar e Soltar (Drag and Drop) ---
+    // Evento: Drop de um elemento na árvore
+    $(document).on('dnd_stop.vakata', function (e, data) {
+        const tree = $('#ou-tree').jstree(true);
+        // Use data.reference para obter o nó de destino de forma confiável
+        const targetNode = tree.get_node(data.reference);
 
-    // 1. Iniciar o arraste a partir da lista de usuários
-    // Usamos delegação de eventos para ouvir o 'mousedown' em qualquer item da lista.
-    $('#user-list-container').on('mousedown', '.list-group-item', function (e) {
-        // Previne o comportamento padrão que poderia interferir no arraste.
-        e.preventDefault();
-        // Inicia o processo de 'dnd' da jsTree manualmente.
-        // Isso "apresenta" o nosso elemento de lista de usuários para a árvore.
-        return $.vakata.dnd.start(e, {
-            'jstree': true,
-            'obj': $(this),
-            'nodes': [{ id: $(this).data('sam'), text: $(this).find('strong').text() }]
-        });
-    });
+        // Garante que o drop foi em um nó válido da árvore
+        if (!targetNode || targetNode.id === '#') {
+            return;
+        }
 
-    // 2. Lidar com os eventos de movimento e soltura
-    $(document)
-        .on('dnd_move.vakata', function (e, data) {
-            // A expansão da OU ao passar o mouse é gerenciada automaticamente pelo plugin dnd.
-            // O 'check_callback' que definimos garante que o ícone de 'drop' só apareça
-            // quando estivermos sobre um nó válido da árvore.
-        })
-        .on('dnd_stop.vakata', function (e, data) {
-            // Evento acionado quando o usuário solta o item.
-            const tree = $('#ou-tree').jstree(true);
-            const targetNode = tree.get_node(data.reference); // Onde o item foi solto
+        // Garante que o elemento arrastado é um usuário da lista
+        const draggedElement = $(data.element);
+        if (!draggedElement.attr('id') || !draggedElement.attr('id').startsWith('user-drag-')) {
+            return;
+        }
 
-            // Garante que o drop foi em um nó válido da árvore
-            if (!targetNode || targetNode.id === '#') {
-                return;
-            }
-
-        // Os dados do nó que iniciou o arraste estão em 'data.data.nodes'.
-        // Esta é a forma mais confiável de obter as informações do usuário.
-        const user_node = data.data.nodes[0];
-        const user_sam = user_node.id;
-        const user_text = user_node.text;
+        const user_sam = draggedElement.data('sam');
+        const user_text = draggedElement.find('strong').text();
         const target_ou_dn = targetNode.id;
-
-        // O elemento DOM original que foi arrastado, para podermos removê-lo visualmente.
-        const draggedElement = data.data.obj;
 
         if (!user_sam || !target_ou_dn) {
             showAlert('Não foi possível identificar o usuário ou a OU de destino.', 'danger');
