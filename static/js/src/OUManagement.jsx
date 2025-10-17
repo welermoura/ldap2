@@ -18,16 +18,19 @@ const transformToTreeData = (apiData) => {
     const tree = [];
     let parentCounter = 0;
 
-    const traverse = (node, parentId) => {
+    const traverse = (node, parentCn) => {
         tree.push({
-            id: node.id,
-            parent: parentId,
-            droppable: true, // Todas as OUs podem receber usuários
+            id: node.cn, // Usa o CN como ID
+            parent: parentCn,
+            droppable: true,
             text: node.text,
+            data: { // Armazena o DN completo para quando precisarmos dele
+                dn: node.id
+            }
         });
 
         if (node.children) {
-            node.children.forEach(child => traverse(child, node.id));
+            node.children.forEach(child => traverse(child, node.cn));
         }
     };
 

@@ -1651,10 +1651,10 @@ def build_ou_tree(conn, base_dn):
             node_name = get_attr_value(entry, 'ou') or get_attr_value(entry, 'cn')
             children = build_ou_tree(conn, entry.distinguishedName.value)
             node = {
-                'id': entry.distinguishedName.value,
+                'id': entry.distinguishedName.value, # DN completo
+                'cn': node_name, # Apenas o CN
                 'text': node_name,
             }
-            # Adiciona a chave 'children' apenas se houver filhos, para evitar crashes no jstree
             if children:
                 node['children'] = children
             tree.append(node)
