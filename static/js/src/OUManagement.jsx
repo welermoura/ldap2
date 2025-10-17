@@ -3,9 +3,9 @@ import axios from 'axios';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
-import OUTree from './OUTree';
-import UserList from './UserList';
-import SearchUser from './SearchUser'; // Criaremos este componente
+import OUTree from './OUTree.jsx';
+import UserList from './UserList.jsx';
+import SearchUser from './SearchUser.jsx';
 
 // Pega o token CSRF do meta tag
 const getCsrfToken = () => {

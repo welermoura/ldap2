@@ -16,4 +16,4 @@ WTForms==3.2.1
 # Para habilitar o Single Sign-On (SSO) com Kerberos, descomente a linha abaixo.
 # Nota: Requer a instalação de bibliotecas de desenvolvimento Kerberos no sistema
 # (ex: `sudo apt-get install libkrb5-dev` em sistemas Debian/Ubuntu).
-# Flask-Kerberos==1.0.4
+# Flask-Kerberos==1.0.4python-dotenv
