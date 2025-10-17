@@ -9,11 +9,17 @@ export default defineConfig({
     outDir: 'static/js/dist',
     // Limpa o diretório de saída antes de cada build
     emptyOutDir: true,
-    // Gera um manifest.json para que o Flask possa encontrar os arquivos corretos
-    manifest: true,
+    // Não gera um manifest.json, pois usaremos um nome de arquivo fixo
+    manifest: false,
     rollupOptions: {
-      // Sobrescreve o ponto de entrada, pois não estamos usando um index.html
+      // Sobrescreve o ponto de entrada
       input: 'static/js/src/index.jsx',
+      output: {
+        // Define nomes de arquivos fixos para evitar hashes
+        entryFileNames: 'bundle.js',
+        chunkFileNames: 'chunks.js',
+        assetFileNames: 'assets/[name].[ext]',
+      },
     },
   },
   server: {
