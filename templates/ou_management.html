@@ -138,15 +138,19 @@ $(function () {
                 'responsive': true,
                 'stripes': true
             },
-            // Importante: check_callback é necessário para o DND funcionar
-            'check_callback': true
+            // check_callback agora valida a operação de DND de fora da árvore
+            'check_callback': function (operation, node, node_parent, node_position, more) {
+                if (operation === 'move_node' || operation === 'copy_node') {
+                    // Impede que nós da própria árvore sejam arrastados
+                    return false;
+                }
+                // Permite o drop de elementos externos
+                return true;
+            }
         },
         'dnd': {
             'open_timeout': 500, // Expande a OU após 500ms de hover
-            'is_draggable': function(nodes) {
-                // Impede que os nós da árvore sejam arrastados
-                return false;
-            }
+            'is_draggable': false // Desativa o DND para os nós da árvore
         },
         'plugins': ['dnd', 'wholerow']
     });
@@ -189,7 +193,8 @@ $(function () {
     // Evento: Drop de um elemento na árvore
     $(document).on('dnd_stop.vakata', function (e, data) {
         const tree = $('#ou-tree').jstree(true);
-        const targetNode = tree.get_node(data.event.target);
+        // Use data.reference para obter o nó de destino de forma confiável
+        const targetNode = tree.get_node(data.reference);
 
         // Garante que o drop foi em um nó válido da árvore
         if (!targetNode || targetNode.id === '#') {
