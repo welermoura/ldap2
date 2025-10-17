@@ -112,3 +112,7 @@ dmypy.json
 
 # pytype
 .pytype/
+
+# Application-specific secret keys
+data/secret.key
+data/flask_secret.key
