@@ -29,8 +29,8 @@ else
 fi
 
 # --- Install Python Dependencies ---
-echo "Installing dependencies from requirements.txt into the virtual environment..."
-$VENV_DIR/bin/pip install -r requirements.txt
+echo "Installing or upgrading dependencies from requirements.txt into the virtual environment..."
+$VENV_DIR/bin/pip install --upgrade -r requirements.txt
 
 # --- Install Node.js Dependencies ---
 if command -v npm &> /dev/null; then
