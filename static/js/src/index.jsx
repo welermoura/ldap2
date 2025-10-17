@@ -1,3 +1,5 @@
+console.log("Módulo principal (index.jsx) carregado com sucesso.");
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import OUManagement from './OUManagement.jsx';
