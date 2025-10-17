@@ -1694,12 +1694,14 @@ def api_ou_tree():
                 # O nome do nó raiz da árvore será a própria base de busca
                 # Ex: de 'OU=Escritorios,DC=empresa,DC=com' pega 'Escritorios'
                 base_name = base_dn.split(',')[0].split('=')[1]
+                children = build_ou_tree(conn, base_dn)
                 root_node = {
                     'id': base_dn,
                     'text': base_name,
                     'state': {'opened': True},  # Começa com o nó raiz aberto
-                    'children': build_ou_tree(conn, base_dn)
                 }
+                if children:
+                    root_node['children'] = children
                 tree.append(root_node)
             except IndexError:
                 logging.error(f"Formato inválido para a base de busca: '{base_dn}'. Pulando.")
