@@ -158,7 +158,7 @@ $(function () {
         $('#user-list-placeholder').hide();
         $('#user-list').html('<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></div>').show();
 
-        fetch(`{{ url_for('api_ou_users', ou_dn='__DN__') }}`.replace('__DN__', ou_dn))
+        fetch(`{{ url_for('ou_users', ou_dn='__DN__') }}`.replace('__DN__', ou_dn))
             .then(response => response.json())
             .then(users => {
                 $('#user-list').empty();
