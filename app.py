@@ -1670,12 +1670,15 @@ def api_ou_tree():
     Retorna a estrutura de OUs do Active Directory em formato de árvore (JSON).
     Agora suporta múltiplas bases de busca.
     """
+    logging.info("API /api/ou_tree chamada.")
     try:
         conn = get_read_connection()
         config = load_config()
         search_bases = config.get('AD_SEARCH_BASE')
+        logging.info(f"Bases de busca configuradas: {search_bases}")
 
         if not search_bases:
+            logging.warning("A Base de Busca AD não está configurada.")
             return jsonify({'error': 'A Base de Busca AD não está configurada.'}), 500
 
         # Garante que search_bases seja sempre uma lista para consistência
@@ -1684,8 +1687,9 @@ def api_ou_tree():
 
         tree = []
         for base_dn in search_bases:
+            logging.info(f"Processando base DN: {base_dn}")
             try:
-                # O nó raiz da árvore será a própria base de busca
+                # O nome do nó raiz da árvore será a própria base de busca
                 # Ex: de 'OU=Escritorios,DC=empresa,DC=com' pega 'Escritorios'
                 base_name = base_dn.split(',')[0].split('=')[1]
                 root_node = {
@@ -1700,7 +1704,7 @@ def api_ou_tree():
                 continue  # Pula DNs malformados
             except Exception as e:
                 # Adiciona um nó de erro à árvore para feedback visual no frontend
-                logging.error(f"Erro ao processar a base de busca '{base_dn}': {e}")
+                logging.error(f"Erro ao processar a base de busca '{base_dn}': {e}", exc_info=True)
                 try:
                     base_name_fallback = base_dn.split(',')[0].split('=')[1]
                 except Exception:
@@ -1713,6 +1717,7 @@ def api_ou_tree():
                     'icon': 'fa fa-exclamation-triangle text-danger'
                 })
 
+        logging.info(f"Estrutura de árvore construída (resumo): {json.dumps(tree, indent=2)}")
         return jsonify(tree)
     except Exception as e:
         logging.error(f"Erro geral na API /api/ou_tree: {e}", exc_info=True)
