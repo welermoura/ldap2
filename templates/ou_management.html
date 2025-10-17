@@ -2,267 +2,322 @@
 
 {% block title %}Gerenciamento de OUs{% endblock %}
 
+{% from "_macros.html" import render_page_header %}
+
+{% block head %}
+    {{ super() }}
+    <!-- jsTree CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css" />
+    <style>
+        .tree-container {
+            height: 70vh;
+            overflow: auto;
+            border: 1px solid var(--glass-border-color);
+            border-radius: .375rem;
+            padding: 1rem;
+            background-color: var(--glass-bg-color);
+        }
+        #user-list .list-group-item {
+            cursor: grab;
+            background-color: var(--glass-bg-color);
+            border-color: var(--glass-border-color);
+            color: var(--text-color);
+        }
+        #user-list .list-group-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .jstree-node {
+            color: var(--text-color) !important;
+        }
+        .jstree-wholerow-hovered {
+            background: rgba(0, 123, 255, 0.2) !important;
+        }
+        .jstree-wholerow-clicked {
+            background: rgba(0, 123, 255, 0.4) !important;
+        }
+        .vakata-context {
+            background-color: var(--background-color);
+            border-color: var(--glass-border-color);
+        }
+        .vakata-context-hover > a {
+            background-color: rgba(0, 123, 255, 0.2) !important;
+        }
+    </style>
+{% endblock %}
+
 {% block page_title %}
-<div class="page-header">
-    <h1><i class="fas fa-sitemap me-2"></i>Gerenciamento de Unidades Organizacionais</h1>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-primary"><i class="fas fa-home me-2"></i>Home</a>
-</div>
+    {{ render_page_header('<i class="fas fa-network-wired me-2"></i>Gerenciamento de Unidades Organizacionais') }}
 {% endblock %}
 
 {% block content %}
-<div id="ou-management-root">
-    <div class="d-flex justify-content-center align-items-center" style="height: 50vh;">
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Carregando Interface...</span>
+<div class="row">
+    <!-- Coluna da Árvore de OUs e Busca -->
+    <div class="col-md-5">
+        <div class="card glass-card mb-4">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-search me-2"></i>Buscar Usuário</h5>
+                <form id="search-user-form" class="d-flex">
+                    <input type="text" id="user-search-input" class="form-control me-2" placeholder="Digite nome ou login...">
+                    <button type="submit" class="btn btn-primary">Buscar</button>
+                </form>
+                <div id="search-result" class="mt-3"></div>
+            </div>
         </div>
-        <strong class="ms-3">Carregando Interface...</strong>
+        <div class="card glass-card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-sitemap me-2"></i>Estrutura do Active Directory</h5>
+            </div>
+            <div class="card-body">
+                <div id="ou-tree" class="tree-container">
+                    <div class="text-center p-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Carregando árvore...</span>
+                        </div>
+                        <p class="mt-2">Carregando árvore...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Coluna da Lista de Usuários -->
+    <div class="col-md-7">
+        <div class="card glass-card">
+            <div class="card-header">
+                <h5 class="mb-0" id="user-list-title"><i class="fas fa-users me-2"></i>Usuários na OU</h5>
+            </div>
+            <div class="card-body">
+                 <div id="user-list-container" class="tree-container">
+                    <div id="user-list-placeholder" class="text-center text-muted p-5">
+                        <i class="fas fa-arrow-left fa-3x mb-3"></i>
+                        <h5>Selecione uma OU na árvore para ver os usuários.</h5>
+                    </div>
+                    <div id="user-list" class="list-group" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
-{# Inclui React, ReactDOM e Babel via CDN #}
-<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- jQuery (dependência do jsTree) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<!-- jsTree -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
 
-{# Dependências para a árvore e Drag-and-Drop #}
-<script src="https://cdn.jsdelivr.net/npm/react-complex-tree@2.2.0/lib/react-complex-tree.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/react-dnd@16.0.1/dist/umd/ReactDnD.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/react-dnd-html5-backend@16.0.1/dist/umd/ReactDnDHTML5Backend.min.js"></script>
+<script>
+$(function () {
+    const csrfToken = "{{ form.csrf_token._value() }}";
 
-<script type="text/babel" data-presets="react">
-    // Passa o token CSRF para o JavaScript
-    window.csrf_token = "{{ form.csrf_token._value() }}";
+    // Função para mostrar alertas
+    function showAlert(message, category = 'info') {
+        // Reutiliza o sistema de flash messages do base.html se possível, ou cria um novo
+        const alertHtml = `
+            <div class="alert alert-${category} alert-dismissible fade show" role="alert">
+                <i class="fas fa-info-circle me-2"></i>${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>`;
+        // Insere o alerta após o cabeçalho da página
+        $('.page-header').after(alertHtml);
+    }
 
-    const { useState, useEffect, useMemo } = React;
-    const { ControlledTreeEnvironment, Tree, getDescendants } = ReactComplexTree;
-    const { DndProvider, useDrag, useDrop } = ReactDnD;
-    const { HTML5Backend } = ReactDnDHTML5Backend;
+    // Configuração do jsTree
+    $('#ou-tree').jstree({
+        'core': {
+            'data': {
+                'url': "{{ url_for('api_ou_tree') }}",
+                'dataType': 'json',
+                'error': function(xhr) {
+                    $('#ou-tree').html('<div class="alert alert-danger">Erro ao carregar a árvore de OUs. Verifique as permissões e a configuração.</div>');
+                }
+            },
+            'check_callback': function (operation, node, node_parent, node_position, more) {
+                // Permite o drop de usuários (identificados pelo ícone) em nós de OU
+                if (operation === "move_node") {
+                    return more.dnd && more.ref.icon.indexOf('fa-user') === -1;
+                }
+                return true;
+            },
+            'themes': {
+                'name': 'default',
+                'responsive': true,
+                'stripes': true
+            }
+        },
+        'plugins': ['dnd', 'wholerow']
+    });
 
-    const USER_ITEM_TYPE = 'user';
+    // Evento: nó da árvore selecionado
+    $('#ou-tree').on('select_node.jstree', function (e, data) {
+        const ou_dn = data.node.id;
+        const ou_name = data.node.text;
 
-    const DraggableUser = ({ user }) => {
-        const [{ isDragging }, drag] = useDrag(() => ({
-            type: USER_ITEM_TYPE,
-            item: { id: user.id, ...user },
-            collect: monitor => ({ isDragging: !!monitor.isDragging() }),
-        }));
+        $('#user-list-title').html(`<i class="fas fa-users me-2"></i>Usuários em <strong>${ou_name}</strong>`);
+        $('#user-list-placeholder').hide();
+        $('#user-list').html('<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></div>').show();
 
-        return (
-            <div ref={drag} className="list-group-item d-flex justify-content-between align-items-center draggable-user" style={{ opacity: isDragging ? 0.5 : 1, cursor: 'move' }}>
-                <div>
-                    <i className="fas fa-user me-2"></i>
-                    <strong>{user.name}</strong> <small className="text-muted">({user.sam})</small>
-                    <br />
-                    <small className="text-muted">{user.title || 'N/A'}</small>
-                </div>
-            </div>
-        );
-    };
-
-    const DroppableTreeItem = (props) => {
-        const { item, children } = props;
-        const [{ isOver, canDrop }, drop] = useDrop(() => ({
-            accept: USER_ITEM_TYPE,
-            drop: (draggedItem) => props.onDrop(draggedItem, item),
-            canDrop: () => item.isFolder && item.canMove,
-            collect: monitor => ({
-                isOver: !!monitor.isOver(),
-                canDrop: !!monitor.canDrop(),
-            }),
-        }), [item, props.onDrop]);
-
-        let style = {};
-        if (isOver && canDrop) {
-            style.background = 'rgba(40, 167, 69, 0.2)';
-            style.outline = '1px solid var(--bs-success)';
-        }
-
-        return (
-            <div ref={drop} style={style} className="rct-tree-item-container">
-                {children}
-            </div>
-        );
-    };
-
-    const OUManagement = () => {
-        const [treeData, setTreeData] = useState({ root: { index: 'root', children: [], data: 'Root', isFolder: true } });
-        const [focusedItem, setFocusedItem] = useState();
-        const [expandedItems, setExpandedItems] = useState([]);
-        const [selectedItems, setSelectedItems] = useState([]);
-        const [users, setUsers] = useState([]);
-        const [selectedOU, setSelectedOU] = useState(null);
-        const [loading, setLoading] = useState(false);
-        const [error, setError] = useState(null);
-        const [searchQuery, setSearchQuery] = useState('');
-        const [searchResults, setSearchResults] = useState([]);
-        const csrfToken = window.csrf_token;
-
-        useEffect(() => {
-            fetch('/api/ou_tree')
-                .then(res => res.json())
-                .then(data => {
-                    if (!data || data.length === 0) {
-                        setError('Não foi possível carregar a estrutura de OUs. A resposta da API está vazia.');
-                        return;
-                    }
-                    const rootNode = data[0];
-                    const rootId = rootNode.id;
-                    const items = { root: { index: rootId, canMove: false, isFolder: true, children: rootNode.children.map(c => c.id), data: rootNode.name } };
-
-                    function buildItems(nodes) {
-                        nodes.forEach(node => {
-                            items[node.id] = { index: node.id, canMove: true, isFolder: true, children: node.children.map(c => c.id), data: node.name };
-                            if (node.children.length) buildItems(node.children);
-                        });
-                    }
-                    buildItems(rootNode.children);
-                    setTreeData(items);
-                    setExpandedItems([rootId]);
-                    setSelectedOU(rootId);
-                })
-                .catch(err => setError('Falha ao carregar a árvore de OUs. Verifique a conexão e as permissões.'));
-        }, []);
-
-        useEffect(() => {
-            if (!selectedOU) return;
-            setLoading(true);
-            setError(null);
-            fetch(`/api/ou_users/${selectedOU}`)
-                .then(res => res.json())
-                .then(data => { setUsers(data); setLoading(false); })
-                .catch(err => { setError('Falha ao carregar usuários.'); setLoading(false); });
-        }, [selectedOU]);
-
-        const handleMoveUser = (user, targetOU) => {
-            if (!user || !targetOU || !targetOU.isFolder || !targetOU.canMove) return;
-
-            fetch('/api/move_user', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                body: JSON.stringify({ user_dn: user.id, target_ou_dn: targetOU.index }),
-            })
-            .then(res => res.json().then(data => ({ ok: res.ok, data })))
-            .then(({ ok, data }) => {
-                if (ok) {
-                    setUsers(prev => prev.filter(u => u.id !== user.id));
-                    alert(data.message || 'Usuário movido com sucesso!');
+        fetch(`{{ url_for('api_ou_users', ou_dn='__DN__') }}`.replace('__DN__', ou_dn))
+            .then(response => response.json())
+            .then(users => {
+                $('#user-list').empty();
+                if (users.length === 0) {
+                    $('#user-list').append('<div class="list-group-item text-muted">Nenhum usuário encontrado nesta OU.</div>');
                 } else {
-                    throw new Error(data.message || 'Erro desconhecido');
+                    users.forEach(user => {
+                        const userNode = {
+                            id: `user-${user.id}`,
+                            text: user.text,
+                            li_attr: { 'data-sam': user.id, 'draggable': true }
+                        };
+
+                        const userEl = $(`
+                            <div class="list-group-item" id="user-${user.id}" draggable="true" data-sam="${user.id}">
+                                <i class="fas fa-user me-2"></i>
+                                <strong>${user.text}</strong>
+                                <small class="text-muted d-block">${user.title || 'Cargo não definido'}</small>
+                            </div>
+                        `);
+
+                        userEl.on('dragstart', function(e) {
+                            e.originalEvent.dataTransfer.setData('text/plain', JSON.stringify({
+                                sam: $(this).data('sam'),
+                                text: $(this).find('strong').text()
+                            }));
+                        });
+
+                        $('#user-list').append(userEl);
+                    });
                 }
             })
-            .catch(err => alert(`Erro ao mover usuário: ${err.message}`));
-        };
+            .catch(error => {
+                $('#user-list').html('<div class="alert alert-danger">Erro ao carregar usuários.</div>');
+                console.error('Error fetching users:', error);
+            });
+    });
 
-        const handleSearch = (e) => {
-            e.preventDefault();
-            if (searchQuery.length < 3) { setSearchResults([]); return; }
-            fetch(`/api/search_user_location?query=${searchQuery}`)
-                .then(res => res.json())
-                .then(data => setSearchResults(data))
-                .catch(() => setSearchResults([]));
-        };
+    // Evento: Drop de um nó (usuário) na árvore
+    $(document).on('dnd_stop.vakata', function (e, data) {
+        const tree = $('#ou-tree').jstree(true);
+        const targetNode = tree.get_node(data.event.target);
 
-        const handleGoToUser = (user) => {
-            const ouPath = user.ou_dn.split(',').reduce((acc, part, i, arr) => {
-                if (i === 0) acc.push(arr.slice(i).join(','));
-                else acc.push(arr.slice(i).join(','));
-                return acc;
-            }, []);
+        if (!targetNode) {
+            showAlert('Movimentação cancelada. Destino inválido.', 'warning');
+            return;
+        }
 
-            const fullPath = [treeData.root.index, ...ouPath.reverse()];
-            setExpandedItems(prev => [...new Set([...prev, ...fullPath])]);
-            setSelectedOU(user.ou_dn);
-            setFocusedItem(user.ou_dn);
-            setSearchQuery('');
-            setSearchResults([]);
-        };
+        const target_ou_dn = targetNode.id;
+        let draggedData;
+        try {
+            draggedData = JSON.parse(data.data.origin.originalEvent.dataTransfer.getData('text/plain'));
+        } catch(err) {
+            console.error("Could not parse drag data", err);
+            return;
+        }
+        const user_sam = draggedData.sam;
+        const user_text = draggedData.text;
 
-        return (
-            <DndProvider backend={HTML5Backend}>
-                <div className="row">
-                    <div className="col-lg-5 mb-4">
-                        <div className="card glass-card h-100">
-                            <div className="card-header"><h5>Estrutura Organizacional</h5></div>
-                            <div className="card-body ou-tree-container" style={{ minHeight: '60vh', overflowY: 'auto' }}>
-                                <ControlledTreeEnvironment
-                                    items={treeData}
-                                    getItemTitle={item => item.data}
-                                    viewState={{ 'ou-tree': { focusedItem, expandedItems, selectedItems } }}
-                                    onFocusItem={item => setFocusedItem(item.index)}
-                                    onExpandItem={item => setExpandedItems([...expandedItems, item.index])}
-                                    onCollapseItem={item => setExpandedItems(expandedItems.filter(id => id !== item.index && !getDescendants(treeData, item.index).includes(id)))}
-                                    onSelectItems={items => { setSelectedItems(items); if (items.length === 1) setSelectedOU(items[0]); }}
-                                    renderItem={props => <DroppableTreeItem {...props} onDrop={handleMoveUser}>{props.children}</DroppableTreeItem>}
-                                >
-                                    <Tree treeId="ou-tree" rootItem="root" treeLabel="Árvore de OUs" />
-                                </ControlledTreeEnvironment>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="col-lg-7">
-                        <div className="card glass-card mb-4">
-                            <div className="card-body">
-                                <form onSubmit={handleSearch}>
-                                    <div className="input-group">
-                                        <input type="text" className="form-control" placeholder="Buscar usuário por nome ou login..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                                        <button className="btn btn-primary" type="submit"><i className="fas fa-search"></i></button>
-                                    </div>
-                                </form>
-                                {searchResults.length > 0 && (
-                                    <div className="list-group mt-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                                        {searchResults.map(user => (
-                                            <a href="#" key={user.dn} className="list-group-item list-group-item-action" onClick={(e) => { e.preventDefault(); handleGoToUser(user); }}>
-                                                {user.name} ({user.sam})
-                                            </a>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="card glass-card">
-                            <div className="card-header"><h5>Usuários em: {selectedOU && treeData[selectedOU] ? treeData[selectedOU].data : '...'}</h5></div>
-                            <div className="card-body user-list-container" style={{ minHeight: '50vh', overflowY: 'auto' }}>
-                                {loading && <p>Carregando usuários...</p>}
-                                {error && <div className="alert alert-danger">{error}</div>}
-                                {!loading && !error && (
-                                    <div className="list-group">
-                                        {users.map(user => <DraggableUser key={user.id} user={user} />)}
-                                        {users.length === 0 && <p className="text-muted">Nenhum usuário encontrado nesta OU.</p>}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </DndProvider>
-        );
-    };
+        if (!user_sam || !target_ou_dn) {
+            showAlert('Não foi possível identificar o usuário ou a OU de destino.', 'danger');
+            return;
+        }
 
-    const container = document.getElementById('ou-management-root');
-    if (container) {
-        const root = ReactDOM.createRoot(container);
-        root.render(
-            <React.StrictMode>
-                <OUManagement />
-            </React.StrictMode>
-        );
-    } else {
-        console.error('Target container "ou-management-root" not found in the DOM.');
-    }
+        if (!confirm(`Tem certeza que deseja mover o usuário '${user_text}' para a OU '${targetNode.text}'?`)) {
+            return;
+        }
+
+        fetch("{{ url_for('move_user') }}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                user_sam: user_sam,
+                target_ou_dn: target_ou_dn
+            })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                showAlert(result.message, 'success');
+                // Remove o usuário da lista antiga e atualiza a árvore
+                $(`#user-${user_sam}`).fadeOut(500, function() { $(this).remove(); });
+            } else {
+                showAlert(result.error || 'Ocorreu um erro desconhecido.', 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Erro de comunicação ao tentar mover o usuário.', 'danger');
+            console.error('Move user error:', error);
+        });
+    });
+
+    // Busca de usuário
+    $('#search-user-form').on('submit', function(e) {
+        e.preventDefault();
+        const query = $('#user-search-input').val();
+        if (query.length < 3) {
+            showAlert('Digite pelo menos 3 caracteres para buscar.', 'warning');
+            return;
+        }
+
+        const searchResultDiv = $('#search-result');
+        searchResultDiv.html('<div class="spinner-border spinner-border-sm" role="status"></div> Buscando...');
+
+        fetch("{{ url_for('search_user_location') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ query: query })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.error) });
+            }
+            return response.json();
+        })
+        .then(data => {
+            const tree = $('#ou-tree').jstree(true);
+            tree.deselect_all();
+
+            // Abre a árvore até a OU do usuário e a seleciona
+            const ouPath = data.ou_dn.split(',').reverse();
+            let currentPath = [];
+            let fullDnParts = [];
+
+            // Recria os DNs pais para abrir a árvore corretamente
+            let parentDns = [];
+            const dnParts = data.ou_dn.split(',');
+            for (let i = 0; i < dnParts.length -1; i++) {
+                parentDns.push(dnParts.slice(i).join(','));
+            }
+            parentDns.reverse();
+
+            // Abre cada nó pai sequencialmente
+            parentDns.forEach(dn => {
+                tree.open_node(dn);
+            });
+
+            // Seleciona a OU final após um pequeno atraso para garantir que foi aberta
+            setTimeout(() => {
+                tree.select_node(data.ou_dn);
+                const nodeElement = tree.get_node(data.ou_dn, true);
+                if (nodeElement) {
+                    nodeElement.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 500);
+
+            searchResultDiv.html(`
+                <div class="alert alert-success">
+                    Usuário encontrado! Navegando para: <br>
+                    <strong>${data.ou_path.replace(/ --- /g, ' / ')}</strong>
+                </div>`);
+        })
+        .catch(error => {
+            searchResultDiv.html(`<div class="alert alert-danger">${error.message}</div>`);
+        });
+    });
+});
 </script>
-<style>
-    .ou-tree-container .rct-tree-item-li {
-        line-height: 1.8;
-    }
-    .rct-tree-item-container {
-      padding: 2px 5px;
-      border-radius: 4px;
-    }
-    .draggable-user {
-        cursor: move;
-    }
-</style>
 {% endblock %}
