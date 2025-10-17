@@ -1649,18 +1649,24 @@ def build_ou_tree(conn, base_dn):
         for entry in sorted_entries:
             # O nome do nó pode ser 'ou' ou 'cn' (para containers como 'Users')
             node_name = get_attr_value(entry, 'ou') or get_attr_value(entry, 'cn')
+            children = build_ou_tree(conn, entry.distinguishedName.value)
             node = {
                 'id': entry.distinguishedName.value,
                 'text': node_name,
-                'children': build_ou_tree(conn, entry.distinguishedName.value)
             }
+            # Adiciona a chave 'children' apenas se houver filhos, para evitar crashes no jstree
+            if children:
+                node['children'] = children
             tree.append(node)
+
     except ldap3.core.exceptions.LDAPInvalidDnError:
         # Ignora DNs inválidos que podem aparecer em algumas configurações
         pass
     except Exception as e:
-        logging.error(f"Erro ao construir a árvore de OUs para a base '{base_dn}': {e}")
-    return tree
+        logging.error(f"Erro ao construir a árvore de OUs para a base '{base_dn}': {e}", exc_info=True)
+
+    # Retorna None se a lista estiver vazia, para o frontend lidar corretamente
+    return tree if tree else None
 
 @app.route('/api/ou_tree')
 @require_auth
