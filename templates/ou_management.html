@@ -133,17 +133,19 @@ $(function () {
                     $('#ou-tree').html('<div class="alert alert-danger">Erro ao carregar a árvore de OUs. Verifique as permissões e a configuração.</div>');
                 }
             },
-            'check_callback': function (operation, node, node_parent, node_position, more) {
-                // Permite o drop de usuários (identificados pelo ícone) em nós de OU
-                if (operation === "move_node") {
-                    return more.dnd && more.ref.icon.indexOf('fa-user') === -1;
-                }
-                return true;
-            },
             'themes': {
                 'name': 'default',
                 'responsive': true,
                 'stripes': true
+            },
+            // Importante: check_callback é necessário para o DND funcionar
+            'check_callback': true
+        },
+        'dnd': {
+            'open_timeout': 500, // Expande a OU após 500ms de hover
+            'is_draggable': function(nodes) {
+                // Impede que os nós da árvore sejam arrastados
+                return false;
             }
         },
         'plugins': ['dnd', 'wholerow']
@@ -166,27 +168,14 @@ $(function () {
                     $('#user-list').append('<div class="list-group-item text-muted">Nenhum usuário encontrado nesta OU.</div>');
                 } else {
                     users.forEach(user => {
-                        const userNode = {
-                            id: `user-${user.id}`,
-                            text: user.text,
-                            li_attr: { 'data-sam': user.id, 'draggable': true }
-                        };
-
+                        // Adiciona o prefixo 'user-drag-' para identificar os elementos arrastáveis
                         const userEl = $(`
-                            <div class="list-group-item" id="user-${user.id}" draggable="true" data-sam="${user.id}">
+                            <div class="list-group-item" id="user-drag-${user.id}" draggable="true" data-sam="${user.id}">
                                 <i class="fas fa-user me-2"></i>
                                 <strong>${user.text}</strong>
                                 <small class="text-muted d-block">${user.title || 'Cargo não definido'}</small>
                             </div>
                         `);
-
-                        userEl.on('dragstart', function(e) {
-                            e.originalEvent.dataTransfer.setData('text/plain', JSON.stringify({
-                                sam: $(this).data('sam'),
-                                text: $(this).find('strong').text()
-                            }));
-                        });
-
                         $('#user-list').append(userEl);
                     });
                 }
@@ -197,26 +186,25 @@ $(function () {
             });
     });
 
-    // Evento: Drop de um nó (usuário) na árvore
+    // Evento: Drop de um elemento na árvore
     $(document).on('dnd_stop.vakata', function (e, data) {
         const tree = $('#ou-tree').jstree(true);
         const targetNode = tree.get_node(data.event.target);
 
-        if (!targetNode) {
-            showAlert('Movimentação cancelada. Destino inválido.', 'warning');
+        // Garante que o drop foi em um nó válido da árvore
+        if (!targetNode || targetNode.id === '#') {
             return;
         }
 
-        const target_ou_dn = targetNode.id;
-        let draggedData;
-        try {
-            draggedData = JSON.parse(data.data.origin.originalEvent.dataTransfer.getData('text/plain'));
-        } catch(err) {
-            console.error("Could not parse drag data", err);
+        // Garante que o elemento arrastado é um usuário da lista
+        const draggedElement = $(data.element);
+        if (!draggedElement.attr('id') || !draggedElement.attr('id').startsWith('user-drag-')) {
             return;
         }
-        const user_sam = draggedData.sam;
-        const user_text = draggedData.text;
+
+        const user_sam = draggedElement.data('sam');
+        const user_text = draggedElement.find('strong').text();
+        const target_ou_dn = targetNode.id;
 
         if (!user_sam || !target_ou_dn) {
             showAlert('Não foi possível identificar o usuário ou a OU de destino.', 'danger');
@@ -242,8 +230,8 @@ $(function () {
         .then(result => {
             if (result.success) {
                 showAlert(result.message, 'success');
-                // Remove o usuário da lista antiga e atualiza a árvore
-                $(`#user-${user_sam}`).fadeOut(500, function() { $(this).remove(); });
+                // Remove o usuário da lista para indicar que a ação foi bem-sucedida
+                draggedElement.fadeOut(500, function() { $(this).remove(); });
             } else {
                 showAlert(result.error || 'Ocorreu um erro desconhecido.', 'danger');
             }
