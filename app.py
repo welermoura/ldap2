@@ -1726,6 +1726,12 @@ def api_ou_tree():
                     'icon': 'fa fa-exclamation-triangle text-danger'
                 })
 
+        if not tree:
+            logging.warning("Nenhuma OU encontrada. Verifique a configuração 'AD_SEARCH_BASE' e as permissões da conta de serviço.")
+            return jsonify({
+                'error': "Nenhuma Unidade Organizacional foi encontrada. Verifique se a 'Base de Busca AD' na configuração está correta e se a conta de serviço tem permissão para ler as OUs."
+            }), 404
+
         return jsonify(tree)
     except Exception as e:
         logging.error(f"Erro geral na API /api/ou_tree: {e}", exc_info=True)

@@ -3,9 +3,10 @@ import axios from 'axios';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
-import ReactTreeView from './ReactTreeView.jsx';
+import OUTree from './OUTree.jsx';
 import UserList from './UserList.jsx';
 import SearchUser from './SearchUser.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 
 // Pega o token CSRF do meta tag
 const getCsrfToken = () => {
@@ -50,6 +51,7 @@ const transformToTreeData = (apiData) => {
 
 const OUManagement = () => {
     const [ouTree, setOuTree] = useState([]);
+    const [treeError, setTreeError] = useState(null);
     const [selectedOU, setSelectedOU] = useState({ dn: null, name: null });
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -65,11 +67,13 @@ const OUManagement = () => {
             .then(response => {
                 const formattedTree = transformToTreeData(response.data);
                 setOuTree(formattedTree);
+                setTreeError(null); // Limpa erros anteriores
                 setLoading(false);
             })
             .catch(err => {
-                console.error("Erro ao buscar a árvore de OUs:", err);
-                showAlert("Não foi possível carregar a estrutura de OUs.", "danger");
+                console.error("Erro ao buscar a árvore de OUs:", err.response?.data?.error || err.message);
+                // Armazena a mensagem de erro específica da API
+                setTreeError(err.response?.data?.error || "Não foi possível carregar a estrutura de OUs. Verifique a conexão com o servidor.");
                 setLoading(false);
             });
     }, []);
@@ -147,11 +151,20 @@ const OUManagement = () => {
                             <h5 className="mb-0"><i className="fas fa-sitemap me-2"></i>Estrutura do Active Directory</h5>
                         </div>
                         <div className="card-body tree-container">
-                            <ReactTreeView
-                                treeData={ouTree}
-                                onSelectOU={fetchUsers}
-                                onMoveUser={handleMoveUser}
-                            />
+                            <ErrorBoundary>
+                                {treeError ? (
+                                    <div className="alert alert-warning">
+                                        <h5 className="alert-heading"><i className="fas fa-exclamation-triangle me-2"></i>Não foi possível carregar a árvore</h5>
+                                        <p>{treeError}</p>
+                                    </div>
+                                ) : (
+                                    <OUTree
+                                        treeData={ouTree}
+                                        onSelectOU={fetchUsers}
+                                        onMoveUser={handleMoveUser}
+                                    />
+                                )}
+                            </ErrorBoundary>
                         </div>
                     </div>
                 </div>
